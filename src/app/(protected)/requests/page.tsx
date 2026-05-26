@@ -164,7 +164,7 @@ export default function RequestsPage() {
     form.setFieldsValue({ requestDate: dayjs(), cargoes: [] });
     setOpen(true);
   };
-  const onEdit = (r: any) => {
+  const onEdit = async (r: any) => {
     setEditing(r);
     form.setFieldsValue({
       ...r,
@@ -174,6 +174,7 @@ export default function RequestsPage() {
       cargoes: [],
     });
     setOpen(true);
+    setViewReq(await getRequest(r.id)); // для управления грузами/плечами прямо в форме
   };
   const onDelete = async (id: string) => {
     try { await deleteRequest(id); message.success('Удалено'); load(); }
@@ -189,6 +190,27 @@ export default function RequestsPage() {
     plannedDropoff: l.plannedDropoff ? l.plannedDropoff.toISOString() : null,
   }));
   const serializeCargoes = (arr: any[]) => (arr || []).map((c: any) => ({ ...c, legs: serializeLegs(c.legs) }));
+  // Груз из БД (на существующей заявке) → формат данных шаблона
+  const dbCargoToTpl = (c: any) => ({
+    consigneeId: c.consigneeId ?? undefined,
+    unitType: c.unitType || 'PALLET',
+    pallets: c.pallets ?? undefined,
+    traysCount: c.traysCount ?? undefined,
+    weightKg: c.weightKg != null ? Number(c.weightKg) : undefined,
+    productCategory: c.productCategory ?? undefined,
+    tempRegime: c.tempRegime ?? undefined,
+    pricingMode: c.pricingMode || 'CARGO',
+    cost: c.cost != null ? Number(c.cost) : undefined,
+    discount: c.discount != null ? Number(c.discount) : undefined,
+    legs: (c.legs || []).map((l: any) => ({
+      pickupLocationId: l.pickupLocationId ?? undefined,
+      dropoffLocationId: l.dropoffLocationId ?? undefined,
+      plannedPickup: l.plannedPickup ? new Date(l.plannedPickup).toISOString() : null,
+      plannedDropoff: l.plannedDropoff ? new Date(l.plannedDropoff).toISOString() : null,
+      cost: l.cost != null ? Number(l.cost) : undefined,
+      discount: l.discount != null ? Number(l.discount) : undefined,
+    })),
+  });
   const onSubmit = async () => {
     const v = await form.validateFields();
     const payload = {
@@ -282,7 +304,12 @@ export default function RequestsPage() {
   const submitSaveTemplate = async () => {
     const { name } = await tplForm.validateFields();
     const v = form.getFieldsValue(true);
-    const data = { ...v, requestDate: v.requestDate ? v.requestDate.toISOString() : null, requestedDate: v.requestedDate ? v.requestedDate.toISOString() : null, cargoes: serializeCargoes(v.cargoes) };
+    // В режиме создания грузы берём из формы; при сохранении из существующей
+    // заявки (редактирование) форма грузов не содержит — берём их из заявки.
+    const cargoes = Array.isArray(v.cargoes) && v.cargoes.length
+      ? serializeCargoes(v.cargoes)
+      : (editing?.cargoes || []).map(dbCargoToTpl);
+    const data = { ...v, requestDate: v.requestDate ? v.requestDate.toISOString() : null, requestedDate: v.requestedDate ? v.requestedDate.toISOString() : null, cargoes };
     try {
       const existing = templates.find((t) => t.name === name);
       if (existing) { await updateRequestTemplate(existing.id, { name, data }); setSelTemplate(existing.id); }
@@ -344,6 +371,28 @@ export default function RequestsPage() {
     },
   ];
 
+  // Блок управления грузами и плечами — общий для детальной карточки и формы редактирования
+  const renderCargoes = (req: any) => (
+    <>
+      <Divider titlePlacement="left">Грузы и плечи</Divider>
+      {canWrite && <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={openAddCargo} style={{ marginBottom: 8 }}>Добавить груз</Button>}
+      {(req.cargoes || []).length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет грузов" />}
+      {(req.cargoes || []).map((c: any) => (
+        <Card key={c.id} size="small" style={{ marginBottom: 8 }}
+          title={`${c.consignee?.name || 'Груз'} · ${c.pallets ?? '—'}пал/${c.traysCount ?? '—'}лот · итого ${rub(c.finalCost)} · ${c.pricingMode === 'LEG' ? 'цена по плечам' : 'цена на груз'}`}
+          extra={canWrite && (
+            <Space>
+              <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditCargo(c)} />
+              <Popconfirm title="Удалить груз?" onConfirm={() => removeCargo(c.id)}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm>
+            </Space>
+          )}>
+          <Table size="small" rowKey="id" pagination={false} dataSource={c.legs || []} columns={legColumns(c)}
+            locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет плеч" /> }} />
+        </Card>
+      ))}
+    </>
+  );
+
   return (
     <>
       <FilterBar onReset={() => { setFStatus(undefined); setFCustomer(undefined); setFRange(null); }}>
@@ -402,7 +451,7 @@ export default function RequestsPage() {
             </Form.List>
           </>
         )}
-        {editing && <Text type="secondary">Грузы и плечи редактируются в карточке заявки (кнопка «глаз»).</Text>}
+        {editing && viewReq && viewReq.id === editing.id && renderCargoes(viewReq)}
       </EntityForm>
 
       {/* ===== Детальная карточка ===== */}
@@ -430,22 +479,7 @@ export default function RequestsPage() {
               <Descriptions.Item label="Счета">{viewReq.invoices?.length ? viewReq.invoices.map((i: any) => `${i.invoiceNumber} (${rub(i.amount)})`).join(', ') : '—'}</Descriptions.Item>
             </Descriptions>
 
-            <Divider titlePlacement="left">Грузы и плечи</Divider>
-            {canWrite && <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={openAddCargo} style={{ marginBottom: 8 }}>Добавить груз</Button>}
-            {(viewReq.cargoes || []).length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет грузов" />}
-            {(viewReq.cargoes || []).map((c: any) => (
-              <Card key={c.id} size="small" style={{ marginBottom: 8 }}
-                title={`${c.consignee?.name || 'Груз'} · ${c.pallets ?? '—'}пал/${c.traysCount ?? '—'}лот · итого ${rub(c.finalCost)} · ${c.pricingMode === 'LEG' ? 'цена по плечам' : 'цена на груз'}`}
-                extra={canWrite && (
-                  <Space>
-                    <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditCargo(c)} />
-                    <Popconfirm title="Удалить груз?" onConfirm={() => removeCargo(c.id)}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm>
-                  </Space>
-                )}>
-                <Table size="small" rowKey="id" pagination={false} dataSource={c.legs || []} columns={legColumns(c)}
-                  locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет плеч" /> }} />
-              </Card>
-            ))}
+            {renderCargoes(viewReq)}
           </>
         )}
       </Modal>
