@@ -33,3 +33,7 @@ yarn-error.log*
 # misc
 /coverage
 *.tsbuildinfo
+
+# данные справочников (не коммитим бизнес-данные в публичный репозиторий)
+*.xlsx
+references.json
