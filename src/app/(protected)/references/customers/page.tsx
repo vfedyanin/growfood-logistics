@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Button, Form, Input, Select, Switch, Space, Popconfirm, Tag, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
+import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
 import { VerticalSelect } from '@/components/selects/EntitySelects';
@@ -71,7 +72,7 @@ export default function CustomersPage() {
     <>
       <DataTable title="Контрагенты" data={data} columns={columns} loading={loading}
         searchableKeys={['code', 'name', 'inn']}
-        toolbar={w ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button> : undefined} />
+        toolbar={<Space><ImportExportButtons resource="customers" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать контрагента' : 'Новый контрагент'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:customer">
         <Form.Item name="code" label="Код" rules={[{ required: true }]}><Input disabled={!!editing} placeholder="MAGNIT" /></Form.Item>

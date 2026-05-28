@@ -5,6 +5,7 @@ import { Button, Form, Input, InputNumber, DatePicker, Space, Popconfirm, messag
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
+import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
 import { RouteSelect, VehicleTypeSelect } from '@/components/selects/EntitySelects';
@@ -67,7 +68,7 @@ export default function MarketPricesPage() {
   return (
     <>
       <DataTable title="Рыночные цены" data={data} columns={columns} loading={loading}
-        toolbar={w ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button> : undefined} />
+        toolbar={<Space><ImportExportButtons resource="market-prices" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать цену' : 'Новая рыночная цена'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing}>
         <Form.Item name="routeId" label="Маршрут" rules={[{ required: true }]}><RouteSelect style={{ width: '100%' }} /></Form.Item>

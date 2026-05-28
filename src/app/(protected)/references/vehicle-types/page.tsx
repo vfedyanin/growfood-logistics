@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Button, Form, Input, InputNumber, Switch, Space, Popconfirm, Tag, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
+import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
 import { getVehicleTypes, createVehicleType, updateVehicleType, deleteVehicleType } from '@/lib/actions/references';
@@ -57,7 +58,7 @@ export default function VehicleTypesPage() {
     <>
       <DataTable title="Типы транспорта" data={data} columns={columns} loading={loading} rowKey="code"
         searchableKeys={['code', 'name']}
-        toolbar={w ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button> : undefined} />
+        toolbar={<Space><ImportExportButtons resource="vehicle-types" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать тип ТС' : 'Новый тип ТС'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:vehicleType">
         <Form.Item name="code" label="Код" rules={[{ required: true }]}><Input disabled={!!editing} placeholder="REF_20T" /></Form.Item>

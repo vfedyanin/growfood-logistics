@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Button, Form, Input, Switch, Space, Popconfirm, Tag, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
+import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
 import { VehicleTypeSelect, CarrierSelect } from '@/components/selects/EntitySelects';
@@ -58,7 +59,7 @@ export default function VehiclesPage() {
     <>
       <DataTable title="Транспортные средства" data={data} columns={columns} loading={loading}
         searchableKeys={['plateNumber', 'brandModel']}
-        toolbar={w ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button> : undefined} />
+        toolbar={<Space><ImportExportButtons resource="vehicles" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать ТС' : 'Новое ТС'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:vehicle">
         <Form.Item name="plateNumber" label="Гос. номер" rules={[{ required: true }]}><Input placeholder="А123БВ77" /></Form.Item>
