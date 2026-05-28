@@ -212,17 +212,28 @@ export default function RequestsPage() {
     })),
   });
   const onSubmit = async () => {
-    const v = await form.validateFields();
-    const payload = {
-      ...v,
-      requestDate: v.requestDate ? v.requestDate.toISOString() : null,
-      requestedDate: v.requestedDate ? v.requestedDate.toISOString() : null,
-    };
     try {
+      const v = await form.validateFields();
+      const payload = {
+        ...v,
+        requestDate: v.requestDate ? v.requestDate.toISOString() : null,
+        requestedDate: v.requestedDate ? v.requestedDate.toISOString() : null,
+      };
       if (editing) await updateRequest(editing.id, payload);
       else await createRequest({ ...payload, cargoes: serializeCargoes(v.cargoes) });
       message.success('Сохранено'); setOpen(false); load();
-    } catch (e: any) { message.error(e?.message || 'Ошибка сохранения'); }
+    } catch (e: any) {
+      console.error('[onSubmit] FAILED:', e);
+      if (e?.errorFields) {
+        message.error('Заполните обязательные поля');
+      } else {
+        Modal.error({
+          title: 'Не удалось сохранить заявку',
+          width: 640,
+          content: <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, fontFamily: 'monospace', margin: 0 }}>{e?.message || String(e)}</pre>,
+        });
+      }
+    }
   };
 
   const openView = async (r: any) => { setViewReq(await getRequest(r.id)); setViewOpen(true); };
