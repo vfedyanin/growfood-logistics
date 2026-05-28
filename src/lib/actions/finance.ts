@@ -59,6 +59,7 @@ export async function getTripsEligibleForInvoice() {
 export async function createTripInvoice(payload: {
   tripId: string;
   invoiceNumber?: string;
+  carrierInvoiceNumber?: string | null;
   invoiceDate?: string | null;
   amount?: number | null;
   dueDate?: string | null;
@@ -82,6 +83,7 @@ export async function createTripInvoice(payload: {
   const inv = await prisma.invoice.create({
     data: {
       invoiceNumber: payload.invoiceNumber?.trim() || (await nextInvoiceNumber()),
+      carrierInvoiceNumber: payload.carrierInvoiceNumber?.trim() || null,
       invoiceDate: payload.invoiceDate ? new Date(payload.invoiceDate) : new Date(),
       direction: 'INCOMING',
       carrierId: trip.carrierId,
@@ -102,6 +104,7 @@ export async function createTripInvoice(payload: {
 
 export async function updateTripInvoice(id: string, payload: {
   invoiceNumber?: string;
+  carrierInvoiceNumber?: string | null;
   invoiceDate?: string | null;
   amount?: number | null;
   dueDate?: string | null;
@@ -112,6 +115,7 @@ export async function updateTripInvoice(id: string, payload: {
   const actor = await getActorId();
   const data: any = { updatedById: actor };
   if (payload.invoiceNumber !== undefined) data.invoiceNumber = (payload.invoiceNumber || '').trim();
+  if (payload.carrierInvoiceNumber !== undefined) data.carrierInvoiceNumber = (payload.carrierInvoiceNumber || '').trim() || null;
   if (payload.invoiceDate !== undefined) data.invoiceDate = payload.invoiceDate ? new Date(payload.invoiceDate) : new Date();
   if (payload.amount !== undefined && payload.amount !== null) { data.amount = payload.amount; data.total = payload.amount; }
   if (payload.dueDate !== undefined) data.dueDate = payload.dueDate ? new Date(payload.dueDate) : null;

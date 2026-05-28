@@ -743,6 +743,7 @@ model Invoice {
   carrierActId  String?
   requestId     String?
   tripId        String?
+  carrierInvoiceNumber String?
   amount        Decimal          @db.Decimal(14, 2)
   vatAmount     Decimal?         @db.Decimal(14, 2)
   total         Decimal          @db.Decimal(14, 2)

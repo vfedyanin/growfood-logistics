@@ -55,6 +55,7 @@ export default function CarrierInvoicesPage() {
     form.resetFields();
     form.setFieldsValue({
       invoiceNumber: r.invoiceNumber,
+      carrierInvoiceNumber: r.carrierInvoiceNumber || null,
       invoiceDate: r.invoiceDate ? dayjs(r.invoiceDate) : dayjs(),
       amount: r.amount != null ? Number(r.amount) : null,
       dueDate: r.dueDate ? dayjs(r.dueDate) : null,
@@ -69,6 +70,7 @@ export default function CarrierInvoicesPage() {
       const v = await form.validateFields();
       const payload = {
         invoiceNumber: v.invoiceNumber || undefined,
+        carrierInvoiceNumber: v.carrierInvoiceNumber ?? null,
         invoiceDate: v.invoiceDate ? v.invoiceDate.toISOString() : null,
         amount: v.amount != null ? Number(v.amount) : null,
         dueDate: v.dueDate ? v.dueDate.toISOString() : null,
@@ -120,8 +122,12 @@ export default function CarrierInvoicesPage() {
       render: (s: string) => <Tag color={statusCfg[s]?.color || 'default'}>{statusCfg[s]?.label || s}</Tag>,
     },
     {
-      title: '№ счёта', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 200,
+      title: '№ счёта (внутр.)', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 200,
       render: (v: string) => <span style={{ fontFamily: 'monospace' }}>{v || '—'}</span>,
+    },
+    {
+      title: '№ счёта от перевозчика', dataIndex: 'carrierInvoiceNumber', key: 'carrierInvoiceNumber', width: 200,
+      render: (v: string) => v ? <span style={{ fontFamily: 'monospace' }}>{v}</span> : <span style={{ color: '#bbb' }}>—</span>,
     },
     { title: 'Дата счёта', dataIndex: 'invoiceDate', key: 'invoiceDate', render: fmt, width: 120, responsive: ['lg'] as any },
     {
@@ -165,8 +171,11 @@ export default function CarrierInvoicesPage() {
             </div>
           )}
           <Space wrap size="middle">
-            <Form.Item name="invoiceNumber" label="№ счёта (опц., будет сгенерирован)" tooltip="Если оставите пустым — сгенерируется автоматически">
-              <Input placeholder="напр. от перевозчика" style={{ width: 280 }} />
+            <Form.Item name="invoiceNumber" label="№ счёта (внутр.)" tooltip="Если оставите пустым — сгенерируется автоматически">
+              <Input placeholder="INV-IN-..." style={{ width: 240 }} />
+            </Form.Item>
+            <Form.Item name="carrierInvoiceNumber" label="№ счёта от перевозчика" tooltip="Номер из документа, который выставил перевозчик">
+              <Input placeholder="напр. СчФ-12345" style={{ width: 240 }} />
             </Form.Item>
             <Form.Item name="invoiceDate" label="Дата счёта">
               <DatePicker format="DD.MM.YYYY" style={{ width: 160 }} />
