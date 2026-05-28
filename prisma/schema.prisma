@@ -439,6 +439,7 @@ model Trip {
   cargoUnits    TripCargoUnit[]
   qualityEvents QualityEvent[]
   actTripLinks  ActTripLink[]
+  invoices      Invoice[]
 
   @@index([plannedDeparture])
   @@index([status])
@@ -741,6 +742,8 @@ model Invoice {
   customerActId String?
   carrierActId  String?
   requestId     String?
+  tripId        String?
+  carrierInvoiceNumber String?
   amount        Decimal          @db.Decimal(14, 2)
   vatAmount     Decimal?         @db.Decimal(14, 2)
   total         Decimal          @db.Decimal(14, 2)
@@ -758,6 +761,7 @@ model Invoice {
   customerAct CustomerAct?     @relation(fields: [customerActId], references: [id])
   carrierAct  CarrierAct?      @relation(fields: [carrierActId], references: [id])
   request     CustomerRequest? @relation(fields: [requestId], references: [id])
+  trip        Trip?            @relation(fields: [tripId], references: [id])
   payments    Payment[]
 
   @@index([direction])
