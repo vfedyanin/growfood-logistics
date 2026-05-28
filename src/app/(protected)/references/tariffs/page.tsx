@@ -5,6 +5,7 @@ import { Button, Form, Input, InputNumber, Segmented, DatePicker, Space, Popconf
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
+import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
 import { RouteSelect, VehicleTypeSelect, CustomerContractSelect, CarrierContractSelect } from '@/components/selects/EntitySelects';
@@ -81,7 +82,7 @@ export default function TariffsPage() {
   return (
     <>
       <DataTable title="Тарифы" data={data} columns={columns} loading={loading} scrollX={1000}
-        toolbar={w ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button> : undefined} />
+        toolbar={<Space><ImportExportButtons resource="tariffs" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать тариф' : 'Новый тариф'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing}>
         <Form.Item name="contractSide" label="Сторона договора" rules={[{ required: true }]}>

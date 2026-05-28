@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Button, Form, Input, Select, Switch, Space, Popconfirm, Tag, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
+import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
 import { getVerticals, createVertical, updateVertical, deleteVertical } from '@/lib/actions/references';
@@ -61,7 +62,7 @@ export default function VerticalsPage() {
     <>
       <DataTable title="Вертикали" data={data} columns={columns} loading={loading} rowKey="code"
         searchableKeys={['code', 'name']}
-        toolbar={w ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button> : undefined} />
+        toolbar={<Space><ImportExportButtons resource="verticals" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать вертикаль' : 'Новая вертикаль'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:vertical">
         <Form.Item name="code" label="Код" rules={[{ required: true, message: 'Введите код' }]}>

@@ -5,6 +5,7 @@ import { Button, Form, Input, Switch, DatePicker, Space, Popconfirm, Tag, messag
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
+import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
 import { CarrierSelect } from '@/components/selects/EntitySelects';
@@ -68,7 +69,7 @@ export default function CarrierContractsPage() {
     <>
       <DataTable title="Договоры с перевозчиками" data={data} columns={columns} loading={loading}
         searchableKeys={['contractNumber']}
-        toolbar={w ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button> : undefined} />
+        toolbar={<Space><ImportExportButtons resource="carrier-contracts" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать договор' : 'Новый договор'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing}>
         <Form.Item name="contractNumber" label="№ договора" rules={[{ required: true }]}><Input /></Form.Item>

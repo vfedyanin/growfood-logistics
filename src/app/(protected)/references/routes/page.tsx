@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Button, Form, Input, Select, Switch, Space, Popconfirm, Tag, message, InputNumber } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
+import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
 import { LocationSelect } from '@/components/selects/EntitySelects';
@@ -65,7 +66,7 @@ export default function RoutesPage() {
     <>
       <DataTable title="Маршруты" data={data} columns={columns} loading={loading}
         searchableKeys={['code', 'name']}
-        toolbar={w ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button> : undefined} />
+        toolbar={<Space><ImportExportButtons resource="routes" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать маршрут' : 'Новый маршрут'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:route">
         <Form.Item name="code" label="Код" rules={[{ required: true }]}><Input disabled={!!editing} placeholder="KLP-MSK" /></Form.Item>
