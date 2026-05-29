@@ -1,6 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
+import { serialize } from '@/lib/serialize';
 import { requireAuth, requireRole, requirePermission, getActorId, getCurrentUser, tripTypeScopeFor, canEditTripType, RoleName } from '@/lib/authz';
 import { revalidatePath } from 'next/cache';
 
@@ -11,6 +12,7 @@ const tripInclude = {
   destination: true,
   route: true,
   vehicle: { include: { vehicleType: true } },
+  vehicleType: true,
   driver: true,
   carrier: true,
   vertical: true,
@@ -44,23 +46,30 @@ export async function getTrips(filters?: {
     if (filters.dateFrom) where.plannedDeparture.gte = new Date(filters.dateFrom);
     if (filters.dateTo) where.plannedDeparture.lte = new Date(filters.dateTo);
   }
-  return prisma.trip.findMany({
+  const result = await prisma.trip.findMany({
     where,
-    include: { ...tripInclude, cargoUnits: { select: { pallets: true } } },
+    include: { ...tripInclude, cargoUnits: { include: { requestCargoLeg: { include: { pickupLocation: true, dropoffLocation: true } } } } },
     orderBy: { plannedDeparture: 'desc' },
   });
+  return serialize(result);
 }
 
 export async function getTrip(id: string) {
   await requireAuth();
-  return prisma.trip.findUnique({
+  const result = await prisma.trip.findUnique({
     where: { id },
     include: {
       ...tripInclude,
-      cargoUnits: { include: { vertical: true, customer: true, shipper: true, request: true } },
+      cargoUnits: {
+        include: {
+          vertical: true, customer: true, shipper: true, request: true,
+          requestCargoLeg: { include: { pickupLocation: true, dropoffLocation: true } },
+        },
+      },
       qualityEvents: { orderBy: { createdAt: 'desc' } },
     },
   });
+  return serialize(result);
 }
 
 // ============ tripNumber generator ============

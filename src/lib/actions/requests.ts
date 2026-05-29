@@ -1,6 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
+import { serialize } from '@/lib/serialize';
 import { requireAuth, requireRole, getActorId, RoleName } from '@/lib/authz';
 import { revalidatePath } from 'next/cache';
 
@@ -14,7 +15,7 @@ const reqInclude = {
   pickupLocation: true, deliveryLocation: true,
 };
 const legInclude = { pickupLocation: true, dropoffLocation: true, tripCargoUnit: { include: { trip: true } } };
-const cargoInclude = { consignee: true, legs: { include: legInclude, orderBy: { legOrder: 'asc' as const } } };
+const cargoInclude = { consignee: true, consigneeLocation: true, legs: { include: legInclude, orderBy: { legOrder: 'asc' as const } } };
 
 const num = (v: any) => (v != null ? Number(v) : 0);
 const legFinal = (l: any) => (l.cost != null || l.discount != null ? num(l.cost) - num(l.discount) : null);
@@ -25,7 +26,9 @@ function legCreateData(l: any, order: number, actor: string | null) {
     pickupLocationId: l.pickupLocationId || null,
     dropoffLocationId: l.dropoffLocationId || null,
     plannedPickup: l.plannedPickup ? new Date(l.plannedPickup) : null,
+    plannedPickupTo: l.plannedPickupTo || null,
     plannedDropoff: l.plannedDropoff ? new Date(l.plannedDropoff) : null,
+    plannedDropoffTo: l.plannedDropoffTo || null,
     cost: l.cost ?? null,
     discount: l.discount ?? null,
     finalCost: legFinal(l),
@@ -41,6 +44,7 @@ function cargoScalar(c: any, actor: string | null) {
   const mode = c.pricingMode || 'CARGO';
   return {
     consigneeId: c.consigneeId || null,
+    consigneeLocationId: c.consigneeLocationId || null,
     unitType: c.unitType || 'PALLET',
     pallets: c.pallets ?? null,
     traysCount: c.traysCount ?? null,
@@ -82,19 +86,21 @@ export async function getRequests(filters?: { status?: RequestStatus; customerId
     if (filters.dateFrom) where.requestDate.gte = new Date(filters.dateFrom);
     if (filters.dateTo) where.requestDate.lte = new Date(filters.dateTo);
   }
-  return prisma.customerRequest.findMany({
+  const result = await prisma.customerRequest.findMany({
     where,
     include: { ...reqInclude, cargoes: { include: cargoInclude }, invoices: true },
     orderBy: { createdAt: 'desc' },
   });
+  return serialize(result);
 }
 
 export async function getRequest(id: string) {
   await requireAuth();
-  return prisma.customerRequest.findUnique({
+  const result = await prisma.customerRequest.findUnique({
     where: { id },
     include: { ...reqInclude, cargoes: { include: cargoInclude, orderBy: { createdAt: 'asc' } }, invoices: true },
   });
+  return serialize(result);
 }
 
 export async function getCustomerVerticalCode(customerId: string) {
@@ -125,6 +131,8 @@ export async function createRequest(input: any) {
       requestNumber,
       requestDate: data.requestDate ? new Date(data.requestDate) : new Date(),
       requestedDate: data.requestedDate ? new Date(data.requestedDate) : null,
+      pickupDate: data.pickupDate ? new Date(data.pickupDate) : null,
+      deliveryDate: data.deliveryDate ? new Date(data.deliveryDate) : null,
       status: 'NEW',
       createdById: actor,
       updatedById: actor,
@@ -145,6 +153,8 @@ export async function updateRequest(id: string, input: any) {
       ...data,
       requestDate: data.requestDate ? new Date(data.requestDate) : null,
       requestedDate: data.requestedDate ? new Date(data.requestedDate) : null,
+      pickupDate: data.pickupDate ? new Date(data.pickupDate) : null,
+      deliveryDate: data.deliveryDate ? new Date(data.deliveryDate) : null,
       updatedById: actor,
     },
   });
@@ -372,6 +382,15 @@ export async function getUnassignedCargoLegOptions() {
     value: l.id,
     label: `${l.cargo.request.requestNumber} · ${l.cargo.request.customer?.name || ''} · ${l.pickupLocation?.name || '—'}→${l.dropoffLocation?.name || '—'} · ${l.cargo.pallets ?? '—'}пал/${l.cargo.traysCount ?? '—'}лот`,
   }));
+}
+
+export async function getCargoLegDates(legId: string) {
+  await requireAuth();
+  const leg = await prisma.requestCargoLeg.findUnique({
+    where: { id: legId },
+    select: { plannedPickup: true, plannedDropoff: true },
+  });
+  return leg;
 }
 
 export async function unassignCargoLeg(legId: string) {

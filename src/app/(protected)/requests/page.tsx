@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  Button, Form, Input, InputNumber, Select, DatePicker, Space, Popconfirm, Tag, message,
+  Button, Form, Input, InputNumber, Select, DatePicker, TimePicker, Space, Popconfirm, Tag, message,
   Dropdown, Modal, Divider, Card, Table, Descriptions, Typography, Empty, Segmented,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, MoreOutlined, MinusCircleOutlined, EyeOutlined, FileTextOutlined, CarOutlined, DisconnectOutlined, ThunderboltOutlined } from '@ant-design/icons';
@@ -51,8 +51,12 @@ function LegFields({ name, restField, showPrice }: { name: number; restField: an
     <Space wrap size="small">
       <Form.Item {...restField} name={[name, 'pickupLocationId']} label="Забор"><LocationSelect style={{ width: 180 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'dropoffLocationId']} label="Выгрузка"><LocationSelect style={{ width: 180 }} /></Form.Item>
-      <Form.Item {...restField} name={[name, 'plannedPickup']} label="Забор (план)"><DatePicker showTime format="DD.MM.YYYY HH:mm" /></Form.Item>
-      <Form.Item {...restField} name={[name, 'plannedDropoff']} label="Выгрузка (план)"><DatePicker showTime format="DD.MM.YYYY HH:mm" /></Form.Item>
+      <Form.Item {...restField} name={[name, 'plannedPickupDate']} label="Дата забора"><DatePicker format="DD.MM.YYYY" /></Form.Item>
+      <Form.Item {...restField} name={[name, 'plannedPickupFrom']} label="с"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>
+      <Form.Item {...restField} name={[name, 'plannedPickupTo']} label="до"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>
+      <Form.Item {...restField} name={[name, 'plannedDropoffDate']} label="Дата выгрузки"><DatePicker format="DD.MM.YYYY" /></Form.Item>
+      <Form.Item {...restField} name={[name, 'plannedDropoffFrom']} label="с"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>
+      <Form.Item {...restField} name={[name, 'plannedDropoffTo']} label="до"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>
       {showPrice && <Form.Item {...restField} name={[name, 'cost']} label="Стоимость, ₽"><InputNumber min={0} style={{ width: 120 }} /></Form.Item>}
       {showPrice && <Form.Item {...restField} name={[name, 'discount']} label="Скидка, ₽"><InputNumber min={0} style={{ width: 110 }} /></Form.Item>}
     </Space>
@@ -66,12 +70,11 @@ function CargoCard({ name, restField, onRemove, form }: { name: number; restFiel
     <Card size="small" style={{ marginBottom: 8 }} title={`Груз №${name + 1}`}
       extra={<Button type="text" danger icon={<MinusCircleOutlined />} onClick={onRemove} />}>
       <Space wrap size="middle">
-        <Form.Item {...restField} name={[name, 'consigneeId']} label="Получатель"><CustomerSelect style={{ width: 180 }} /></Form.Item>
-        <Form.Item {...restField} name={[name, 'unitType']} label="Тип ед." initialValue="PALLET"><Select style={{ width: 120 }} options={unitTypeOptions} /></Form.Item>
+        <Form.Item {...restField} name={[name, 'consigneeLocationId']} label="Получатель"><LocationSelect style={{ width: 200 }} /></Form.Item>
+        <Form.Item {...restField} name={[name, 'unitType']} label="Ед. изм." initialValue="PALLET"><Select style={{ width: 120 }} options={unitTypeOptions} /></Form.Item>
         <Form.Item {...restField} name={[name, 'pallets']} label="Паллет"><InputNumber min={0} style={{ width: 90 }} /></Form.Item>
         <Form.Item {...restField} name={[name, 'traysCount']} label="Лотков"><InputNumber min={0} style={{ width: 90 }} /></Form.Item>
         <Form.Item {...restField} name={[name, 'weightKg']} label="Вес, кг"><InputNumber min={0} style={{ width: 100 }} /></Form.Item>
-        <Form.Item {...restField} name={[name, 'productCategory']} label="Категория"><Select style={{ width: 140 }} options={productCatOptions} allowClear /></Form.Item>
         <Form.Item {...restField} name={[name, 'tempRegime']} label="Режим"><Select style={{ width: 130 }} options={tempRegimeOptions} allowClear /></Form.Item>
       </Space>
       <Form.Item {...restField} name={[name, 'pricingMode']} label="Ценообразование" initialValue="CARGO"><Segmented options={pricingModeOptions} /></Form.Item>
@@ -170,6 +173,12 @@ export default function RequestsPage() {
       ...r,
       requestDate: r.requestDate ? dayjs(r.requestDate) : null,
       requestedDate: r.requestedDate ? dayjs(r.requestedDate) : null,
+      pickupDate: r.pickupDate ? dayjs(r.pickupDate) : null,
+      pickupTimeFrom: r.pickupTimeFrom ? dayjs(r.pickupTimeFrom, 'HH:mm') : null,
+      pickupTimeTo: r.pickupTimeTo ? dayjs(r.pickupTimeTo, 'HH:mm') : null,
+      deliveryDate: r.deliveryDate ? dayjs(r.deliveryDate) : null,
+      deliveryTimeFrom: r.deliveryTimeFrom ? dayjs(r.deliveryTimeFrom, 'HH:mm') : null,
+      deliveryTimeTo: r.deliveryTimeTo ? dayjs(r.deliveryTimeTo, 'HH:mm') : null,
       requestedWeightKg: r.requestedWeightKg != null ? Number(r.requestedWeightKg) : null,
       cargoes: [],
     });
@@ -184,15 +193,24 @@ export default function RequestsPage() {
     try { await changeRequestStatus(id, to as any); message.success('Статус изменён'); load(); if (viewReq?.id === id) refreshView(id); }
     catch (e: any) { message.error(e?.message || 'Ошибка'); }
   };
+  const toTimeStr = (v: any) => !v ? null : (typeof v === 'string' ? v : v.format('HH:mm'));
+  const combineDT = (datePart: any, timePart: any) => {
+    if (!datePart) return null;
+    if (!timePart) return datePart.startOf('day').toISOString();
+    return datePart.clone().hour(timePart.hour()).minute(timePart.minute()).second(0).millisecond(0).toISOString();
+  };
   const serializeLegs = (legs: any[]) => (legs || []).map((l: any) => ({
     ...l,
-    plannedPickup: l.plannedPickup ? l.plannedPickup.toISOString() : null,
-    plannedDropoff: l.plannedDropoff ? l.plannedDropoff.toISOString() : null,
+    plannedPickup: combineDT(l.plannedPickupDate, l.plannedPickupFrom),
+    plannedPickupTo: toTimeStr(l.plannedPickupTo),
+    plannedDropoff: combineDT(l.plannedDropoffDate, l.plannedDropoffFrom),
+    plannedDropoffTo: toTimeStr(l.plannedDropoffTo),
   }));
   const serializeCargoes = (arr: any[]) => (arr || []).map((c: any) => ({ ...c, legs: serializeLegs(c.legs) }));
   // Груз из БД (на существующей заявке) → формат данных шаблона
   const dbCargoToTpl = (c: any) => ({
     consigneeId: c.consigneeId ?? undefined,
+    consigneeLocationId: c.consigneeLocationId ?? undefined,
     unitType: c.unitType || 'PALLET',
     pallets: c.pallets ?? undefined,
     traysCount: c.traysCount ?? undefined,
@@ -205,35 +223,34 @@ export default function RequestsPage() {
     legs: (c.legs || []).map((l: any) => ({
       pickupLocationId: l.pickupLocationId ?? undefined,
       dropoffLocationId: l.dropoffLocationId ?? undefined,
-      plannedPickup: l.plannedPickup ? new Date(l.plannedPickup).toISOString() : null,
-      plannedDropoff: l.plannedDropoff ? new Date(l.plannedDropoff).toISOString() : null,
+      plannedPickupDate: l.plannedPickup ? new Date(l.plannedPickup).toISOString() : null,
+      plannedPickupFrom: l.plannedPickup ? new Date(l.plannedPickup).toISOString() : null,
+      plannedPickupTo: l.plannedPickupTo || null,
+      plannedDropoffDate: l.plannedDropoff ? new Date(l.plannedDropoff).toISOString() : null,
+      plannedDropoffFrom: l.plannedDropoff ? new Date(l.plannedDropoff).toISOString() : null,
+      plannedDropoffTo: l.plannedDropoffTo || null,
       cost: l.cost != null ? Number(l.cost) : undefined,
       discount: l.discount != null ? Number(l.discount) : undefined,
     })),
   });
   const onSubmit = async () => {
+    const v = await form.validateFields();
+    const payload = {
+      ...v,
+      requestDate: v.requestDate ? v.requestDate.toISOString() : null,
+      requestedDate: v.requestedDate ? v.requestedDate.toISOString() : null,
+      pickupDate: v.pickupDate ? v.pickupDate.toISOString() : null,
+      pickupTimeFrom: toTimeStr(v.pickupTimeFrom),
+      pickupTimeTo: toTimeStr(v.pickupTimeTo),
+      deliveryDate: v.deliveryDate ? v.deliveryDate.toISOString() : null,
+      deliveryTimeFrom: toTimeStr(v.deliveryTimeFrom),
+      deliveryTimeTo: toTimeStr(v.deliveryTimeTo),
+    };
     try {
-      const v = await form.validateFields();
-      const payload = {
-        ...v,
-        requestDate: v.requestDate ? v.requestDate.toISOString() : null,
-        requestedDate: v.requestedDate ? v.requestedDate.toISOString() : null,
-      };
       if (editing) await updateRequest(editing.id, payload);
       else await createRequest({ ...payload, cargoes: serializeCargoes(v.cargoes) });
       message.success('Сохранено'); setOpen(false); load();
-    } catch (e: any) {
-      console.error('[onSubmit] FAILED:', e);
-      if (e?.errorFields) {
-        message.error('Заполните обязательные поля');
-      } else {
-        Modal.error({
-          title: 'Не удалось сохранить заявку',
-          width: 640,
-          content: <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, fontFamily: 'monospace', margin: 0 }}>{e?.message || String(e)}</pre>,
-        });
-      }
-    }
+    } catch (e: any) { message.error(e?.message || 'Ошибка сохранения'); }
   };
 
   const openView = async (r: any) => { setViewReq(await getRequest(r.id)); setViewOpen(true); };
@@ -244,13 +261,18 @@ export default function RequestsPage() {
     setEditingCargo(c);
     cargoForm.resetFields();
     cargoForm.setFieldsValue({
-      consigneeId: c.consigneeId, unitType: c.unitType, pallets: c.pallets, traysCount: c.traysCount,
-      weightKg: c.weightKg != null ? Number(c.weightKg) : null, productCategory: c.productCategory, tempRegime: c.tempRegime,
+      consigneeLocationId: c.consigneeLocationId, unitType: c.unitType, pallets: c.pallets, traysCount: c.traysCount,
+      weightKg: c.weightKg != null ? Number(c.weightKg) : null, tempRegime: c.tempRegime,
       pricingMode: c.pricingMode, cost: c.cost != null ? Number(c.cost) : null, discount: c.discount != null ? Number(c.discount) : null,
       // редактируем только непривязанные плечи
       legs: (c.legs || []).filter((l: any) => !l.tripCargoUnitId).map((l: any) => ({
         pickupLocationId: l.pickupLocationId, dropoffLocationId: l.dropoffLocationId,
-        plannedPickup: l.plannedPickup ? dayjs(l.plannedPickup) : null, plannedDropoff: l.plannedDropoff ? dayjs(l.plannedDropoff) : null,
+        plannedPickupDate: l.plannedPickup ? dayjs(l.plannedPickup) : null,
+        plannedPickupFrom: l.plannedPickup ? dayjs(l.plannedPickup) : null,
+        plannedPickupTo: l.plannedPickupTo ? dayjs(l.plannedPickupTo, 'HH:mm') : null,
+        plannedDropoffDate: l.plannedDropoff ? dayjs(l.plannedDropoff) : null,
+        plannedDropoffFrom: l.plannedDropoff ? dayjs(l.plannedDropoff) : null,
+        plannedDropoffTo: l.plannedDropoffTo ? dayjs(l.plannedDropoffTo, 'HH:mm') : null,
         cost: l.cost != null ? Number(l.cost) : null, discount: l.discount != null ? Number(l.discount) : null,
       })),
     });
@@ -306,7 +328,19 @@ export default function RequestsPage() {
       requestedDate: d.requestedDate ? dayjs(d.requestedDate) : null,
       cargoes: (d.cargoes || []).map((c: any) => ({
         ...c,
-        legs: (c.legs || []).map((l: any) => ({ ...l, plannedPickup: l.plannedPickup ? dayjs(l.plannedPickup) : null, plannedDropoff: l.plannedDropoff ? dayjs(l.plannedDropoff) : null })),
+        legs: (c.legs || []).map((l: any) => {
+          const pickup = l.plannedPickupDate ? dayjs(l.plannedPickupDate) : null;
+          const dropoff = l.plannedDropoffDate ? dayjs(l.plannedDropoffDate) : null;
+          return {
+            ...l,
+            plannedPickupDate: pickup,
+            plannedPickupFrom: l.plannedPickupFrom ? dayjs(l.plannedPickupFrom) : pickup,
+            plannedPickupTo: l.plannedPickupTo ? dayjs(l.plannedPickupTo, 'HH:mm') : null,
+            plannedDropoffDate: dropoff,
+            plannedDropoffFrom: l.plannedDropoffFrom ? dayjs(l.plannedDropoffFrom) : dropoff,
+            plannedDropoffTo: l.plannedDropoffTo ? dayjs(l.plannedDropoffTo, 'HH:mm') : null,
+          };
+        }),
       })),
     });
     message.success(`Форма заполнена из шаблона «${tpl?.name}»`);
@@ -364,7 +398,11 @@ export default function RequestsPage() {
   // Колонки таблицы плеч внутри карточки груза
   const legColumns = (cargo: any) => [
     { title: 'Маршрут', key: 'route', render: (_: any, l: any) => `${l.pickupLocation?.name || '—'} → ${l.dropoffLocation?.name || '—'}` },
-    { title: 'Забор/выгрузка', key: 'dates', render: (_: any, l: any) => `${fmtt(l.plannedPickup)} / ${fmtt(l.plannedDropoff)}`, responsive: ['lg'] as any },
+    { title: 'Забор/выгрузка', key: 'dates', render: (_: any, l: any) => {
+      const pickup = fmtt(l.plannedPickup) + (l.plannedPickupTo ? `–${l.plannedPickupTo}` : '');
+      const dropoff = fmtt(l.plannedDropoff) + (l.plannedDropoffTo ? `–${l.plannedDropoffTo}` : '');
+      return `${pickup} / ${dropoff}`;
+    }, responsive: ['lg'] as any },
     { title: 'Итого', dataIndex: 'finalCost', key: 'fc', render: rub, responsive: ['lg'] as any },
     { title: 'Рейс', key: 'trip', render: (_: any, l: any) => l.tripCargoUnit?.trip ? <Tag color="green">{l.tripCargoUnit.trip.tripNumber} · {tripStatusCfg[l.tripCargoUnit.trip.status]}</Tag> : <Tag>Без рейса</Tag> },
     {
@@ -390,7 +428,7 @@ export default function RequestsPage() {
       {(req.cargoes || []).length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет грузов" />}
       {(req.cargoes || []).map((c: any) => (
         <Card key={c.id} size="small" style={{ marginBottom: 8 }}
-          title={`${c.consignee?.name || 'Груз'} · ${c.pallets ?? '—'}пал/${c.traysCount ?? '—'}лот · итого ${rub(c.finalCost)} · ${c.pricingMode === 'LEG' ? 'цена по плечам' : 'цена на груз'}`}
+          title={`${c.consigneeLocation?.name || c.consignee?.name || 'Груз'} · ${c.pallets ?? '—'}пал/${c.traysCount ?? '—'}лот · итого ${rub(c.finalCost)} · ${c.pricingMode === 'LEG' ? 'цена по плечам' : 'цена на груз'}`}
           extra={canWrite && (
             <Space>
               <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditCargo(c)} />
@@ -434,18 +472,17 @@ export default function RequestsPage() {
         </Space>
         <Space wrap size="large">
           <Form.Item name="shipperId" label="Грузоотправитель"><CustomerSelect partyRole="SHIPPER" style={{ width: 240 }} /></Form.Item>
-          <Form.Item name="consigneeId" label="Грузополучатель"><CustomerSelect partyRole="CONSIGNEE" style={{ width: 240 }} /></Form.Item>
-        </Space>
-        <Space wrap size="large">
-          <Form.Item name="pickupLocationId" label="Откуда (общее)"><LocationSelect style={{ width: 240 }} /></Form.Item>
-          <Form.Item name="deliveryLocationId" label="Куда (общее)"><LocationSelect style={{ width: 240 }} /></Form.Item>
         </Space>
         <Space wrap size="large">
           <Form.Item name="requestDate" label="Дата заявки"><DatePicker format="DD.MM.YYYY" /></Form.Item>
-          <Form.Item name="requestedDate" label="Желаемая дата"><DatePicker format="DD.MM.YYYY" /></Form.Item>
-          <Form.Item name="traysCount" label="Лотков (опц.)"><InputNumber min={0} style={{ width: 130 }} /></Form.Item>
         </Space>
         <Form.Item name="notes" label="Примечания"><Input.TextArea rows={2} /></Form.Item>
+
+        <Divider titlePlacement="left">Сопроводительные документы</Divider>
+        <Space wrap size="large">
+          <Form.Item name="clientUpd" label="УПД Клиента"><Input style={{ width: 220 }} placeholder="Номер УПД" /></Form.Item>
+          <Form.Item name="transportNote" label="ТрН"><Input style={{ width: 220 }} placeholder="Номер транспортной накладной" /></Form.Item>
+        </Space>
 
         {!editing && (
           <>
@@ -485,7 +522,15 @@ export default function RequestsPage() {
               <Descriptions.Item label="Вертикаль">{viewReq.vertical?.name || '—'}</Descriptions.Item>
               <Descriptions.Item label="Дата заявки">{fmt(viewReq.requestDate)}</Descriptions.Item>
               <Descriptions.Item label="Отправитель">{viewReq.shipper?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Получатель">{viewReq.consignee?.name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Конечная точка выгрузки">{viewReq.deliveryLocation?.name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Дата забора">
+                {viewReq.pickupDate ? fmt(viewReq.pickupDate) : '—'}
+                {(viewReq.pickupTimeFrom || viewReq.pickupTimeTo) ? ` · ${viewReq.pickupTimeFrom || '?'}–${viewReq.pickupTimeTo || '?'}` : ''}
+              </Descriptions.Item>
+              <Descriptions.Item label="Дата доставки">
+                {viewReq.deliveryDate ? fmt(viewReq.deliveryDate) : '—'}
+                {(viewReq.deliveryTimeFrom || viewReq.deliveryTimeTo) ? ` · ${viewReq.deliveryTimeFrom || '?'}–${viewReq.deliveryTimeTo || '?'}` : ''}
+              </Descriptions.Item>
               <Descriptions.Item label="Сумма (итого по грузам)">{rub(reqSum(viewReq))}</Descriptions.Item>
               <Descriptions.Item label="Счета">{viewReq.invoices?.length ? viewReq.invoices.map((i: any) => `${i.invoiceNumber} (${rub(i.amount)})`).join(', ') : '—'}</Descriptions.Item>
             </Descriptions>
@@ -499,12 +544,11 @@ export default function RequestsPage() {
       <Modal open={cargoOpen} title={editingCargo ? 'Редактировать груз' : 'Добавить груз'} onOk={submitCargo} onCancel={() => setCargoOpen(false)} okText="Сохранить" cancelText="Отмена" width={720}>
         <Form form={cargoForm} layout="vertical">
           <Space wrap size="middle">
-            <Form.Item name="consigneeId" label="Получатель"><CustomerSelect style={{ width: 180 }} /></Form.Item>
-            <Form.Item name="unitType" label="Тип ед." initialValue="PALLET"><Select style={{ width: 120 }} options={unitTypeOptions} /></Form.Item>
+            <Form.Item name="consigneeLocationId" label="Получатель"><LocationSelect style={{ width: 200 }} /></Form.Item>
+            <Form.Item name="unitType" label="Ед. изм." initialValue="PALLET"><Select style={{ width: 120 }} options={unitTypeOptions} /></Form.Item>
             <Form.Item name="pallets" label="Паллет"><InputNumber min={0} style={{ width: 90 }} /></Form.Item>
             <Form.Item name="traysCount" label="Лотков"><InputNumber min={0} style={{ width: 90 }} /></Form.Item>
             <Form.Item name="weightKg" label="Вес, кг"><InputNumber min={0} style={{ width: 100 }} /></Form.Item>
-            <Form.Item name="productCategory" label="Категория"><Select style={{ width: 140 }} options={productCatOptions} allowClear /></Form.Item>
             <Form.Item name="tempRegime" label="Режим"><Select style={{ width: 130 }} options={tempRegimeOptions} allowClear /></Form.Item>
           </Space>
           <Form.Item name="pricingMode" label="Ценообразование" initialValue="CARGO"><Segmented options={pricingModeOptions} /></Form.Item>

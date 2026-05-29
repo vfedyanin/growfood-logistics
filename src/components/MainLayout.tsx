@@ -43,8 +43,8 @@ function getItem(
 const menuItems: MenuItem[] = [
   getItem('Дашборд', '/dashboard', <DashboardOutlined />),
   getItem('Операции', '/operations', <CarOutlined />, [
-    getItem('Рейсы', '/operations/trips'),
     getItem('Заявки', '/requests'),
+    getItem('Рейсы', '/operations/trips'),
     getItem('Груз', '/operations/cargo'),
   ]),
   getItem('Справочники', '/references', <BookOutlined />, [
