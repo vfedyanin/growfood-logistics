@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Button, Form, Input, Switch, Space, Popconfirm, Tag, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
+import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
 import { CarrierSelect } from '@/components/selects/EntitySelects';
@@ -58,7 +59,7 @@ export default function DriversPage() {
     <>
       <DataTable title="Водители" data={data} columns={columns} loading={loading}
         searchableKeys={['fullName', 'phone', 'licenseNumber']}
-        toolbar={w ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button> : undefined} />
+        toolbar={<Space><ImportExportButtons resource="drivers" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать водителя' : 'Новый водитель'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:driver">
         <Form.Item name="fullName" label="ФИО" rules={[{ required: true }]}><Input /></Form.Item>

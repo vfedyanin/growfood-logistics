@@ -64,7 +64,7 @@ const menuItems: MenuItem[] = [
   getItem('Финансы', '/finance', <DollarOutlined />, [
     getItem('Экономика рейсов', '/finance/trip-economics', <DollarOutlined />),
     getItem('Акты перевозчиков', '/finance/carrier-acts', <FileTextOutlined />),
-    getItem('Счета перевозчикам', '/finance/carrier-invoices', <CreditCardOutlined />),
+    getItem('Счета за перевозки', '/finance/carrier-invoices', <CreditCardOutlined />),
     getItem('Счета клиентам', '/finance/customer-invoices', <CreditCardOutlined />),
   ]),
 ];

@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Button, Form, Input, Switch, Space, Popconfirm, Tag, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
+import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
 import { getCarriers, createCarrier, updateCarrier, deleteCarrier } from '@/lib/actions/references';
@@ -57,7 +58,7 @@ export default function CarriersPage() {
     <>
       <DataTable title="Перевозчики" data={data} columns={columns} loading={loading}
         searchableKeys={['code', 'name', 'inn']}
-        toolbar={w ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button> : undefined} />
+        toolbar={<Space><ImportExportButtons resource="carriers" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать перевозчика' : 'Новый перевозчик'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:carrier">
         <Form.Item name="code" label="Код" rules={[{ required: true }]}><Input disabled={!!editing} placeholder="DELLIN" /></Form.Item>
