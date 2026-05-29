@@ -1,6 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
+import { serialize } from '@/lib/serialize';
 import { requireAuth, requirePermission, getActorId } from '@/lib/authz';
 import { revalidatePath } from 'next/cache';
 
@@ -9,7 +10,7 @@ const W = 'references.write';
 // ============ CustomerContract ============
 export async function getCustomerContracts() {
   await requireAuth();
-  return prisma.customerContract.findMany({ include: { customer: true }, orderBy: { validFrom: 'desc' } });
+  return serialize(await prisma.customerContract.findMany({ include: { customer: true }, orderBy: { validFrom: 'desc' } }));
 }
 export async function createCustomerContract(data: any) {
   await requirePermission(W);
@@ -34,7 +35,7 @@ export async function deleteCustomerContract(id: string) {
 // ============ CarrierContract ============
 export async function getCarrierContracts() {
   await requireAuth();
-  return prisma.carrierContract.findMany({ include: { carrier: true }, orderBy: { validFrom: 'desc' } });
+  return serialize(await prisma.carrierContract.findMany({ include: { carrier: true }, orderBy: { validFrom: 'desc' } }));
 }
 export async function createCarrierContract(data: any) {
   await requirePermission(W);
@@ -59,7 +60,7 @@ export async function deleteCarrierContract(id: string) {
 // ============ Tariff (полиморфный: один из contract id) ============
 export async function getTariffs() {
   await requireAuth();
-  return prisma.tariff.findMany({
+  return serialize(await prisma.tariff.findMany({
     include: {
       customerContract: { include: { customer: true } },
       carrierContract: { include: { carrier: true } },
@@ -67,7 +68,7 @@ export async function getTariffs() {
       vehicleType: true,
     },
     orderBy: { validFrom: 'desc' },
-  });
+  }));
 }
 function normalizeTariff(data: any) {
   // гарантируем «ровно один контракт»
@@ -105,7 +106,7 @@ export async function deleteTariff(id: string) {
 // ============ MarketPrice ============
 export async function getMarketPrices() {
   await requireAuth();
-  return prisma.marketPrice.findMany({ include: { route: true, vehicleType: true }, orderBy: { validFrom: 'desc' } });
+  return serialize(await prisma.marketPrice.findMany({ include: { route: true, vehicleType: true }, orderBy: { validFrom: 'desc' } }));
 }
 export async function createMarketPrice(data: any) {
   await requirePermission(W);

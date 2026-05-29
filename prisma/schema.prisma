@@ -120,12 +120,14 @@ model Location {
   routesAsDestination Route[]           @relation("RouteDestination")
   tripsAsOrigin       Trip[]            @relation("TripOrigin")
   tripsAsDestination  Trip[]            @relation("TripDestination")
+  customerDeliveries  CustomerDeliveryLocation[]
   legsAsOrigin        TripLeg[]         @relation("LegOrigin")
   legsAsDestination   TripLeg[]         @relation("LegDestination")
   requestsAsPickup    CustomerRequest[] @relation("ReqPickup")
   requestsAsDelivery  CustomerRequest[] @relation("ReqDelivery")
   reqLegAsPickup      RequestCargoLeg[] @relation("RCLPickup")
   reqLegAsDropoff     RequestCargoLeg[] @relation("RCLDropoff")
+  reqCargoAsConsignee RequestCargo[]    @relation("RCConsigneeLocation")
 }
 
 enum LocationType {
@@ -180,6 +182,28 @@ model Customer {
   acts                CustomerAct[]
   invoices            Invoice[]
   payments            Payment[]
+  deliveryLocations   CustomerDeliveryLocation[]
+}
+
+model CustomerDeliveryLocation {
+  id           String         @id @default(cuid())
+  customerId   String
+  locationId   String
+  tariffMethod TariffMethod?
+  tariffAmount Decimal?       @db.Decimal(10, 2)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  customer Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  location Location  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, locationId])
+  @@index([customerId])
+}
+
+enum TariffMethod {
+  PER_PALLET
+  PER_TRIP
 }
 
 enum CustomerType {
@@ -230,6 +254,7 @@ model VehicleType {
   vehicles     Vehicle[]
   tariffs      Tariff[]
   marketPrices MarketPrice[]
+  trips        Trip[]        @relation("TripVehicleType")
 }
 
 model Vehicle {
@@ -399,8 +424,9 @@ model Trip {
   tripType         TripType
   verticalCode     String?
   routeId          String?
-  originId         String
-  destinationId    String
+  originId         String?
+  destinationId    String?
+  vehicleTypeCode  String?
   vehicleId        String?
   driverId         String?
   carrierId        String?
@@ -426,9 +452,10 @@ model Trip {
 
   vertical    Vertical? @relation(fields: [verticalCode], references: [code])
   route       Route?    @relation(fields: [routeId], references: [id])
-  origin      Location  @relation("TripOrigin", fields: [originId], references: [id])
-  destination Location  @relation("TripDestination", fields: [destinationId], references: [id])
-  vehicle     Vehicle?  @relation(fields: [vehicleId], references: [id])
+  origin       Location?    @relation("TripOrigin", fields: [originId], references: [id])
+  destination  Location?    @relation("TripDestination", fields: [destinationId], references: [id])
+  vehicleType  VehicleType? @relation("TripVehicleType", fields: [vehicleTypeCode], references: [code])
+  vehicle      Vehicle?     @relation(fields: [vehicleId], references: [id])
   driver      Driver?   @relation(fields: [driverId], references: [id])
   carrier     Carrier?  @relation(fields: [carrierId], references: [id])
   shipper     Customer? @relation("TripShipper", fields: [shipperId], references: [id])
@@ -576,6 +603,12 @@ model CustomerRequest {
   deliveryLocationId String?
   requestDate        DateTime?
   requestedDate      DateTime?
+  pickupDate         DateTime?
+  pickupTimeFrom     String?
+  pickupTimeTo       String?
+  deliveryDate       DateTime?
+  deliveryTimeFrom   String?
+  deliveryTimeTo     String?
   requestedPallets   Int?
   requestedWeightKg  Decimal?         @db.Decimal(10, 2)
   traysCount         Int?
@@ -583,6 +616,8 @@ model CustomerRequest {
   tempRegime         TempRegime?
   status             RequestStatus    @default(NEW)
   notes              String?
+  clientUpd          String?
+  transportNote      String?
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   createdById        String?
@@ -852,8 +887,9 @@ model TripTemplate {
 model RequestCargo {
   id              String           @id @default(cuid())
   requestId       String
-  consigneeId     String?
-  unitType        CargoUnitType    @default(PALLET)
+  consigneeId             String?
+  consigneeLocationId     String?
+  unitType                CargoUnitType    @default(PALLET)
   pallets         Int?
   traysCount      Int?
   weightKg        Decimal?         @db.Decimal(10, 2)
@@ -869,9 +905,10 @@ model RequestCargo {
   createdById     String?
   updatedById     String?
 
-  request   CustomerRequest   @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  consignee Customer?         @relation("RCConsignee", fields: [consigneeId], references: [id])
-  legs      RequestCargoLeg[]
+  request           CustomerRequest   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  consignee         Customer?         @relation("RCConsignee", fields: [consigneeId], references: [id])
+  consigneeLocation Location?         @relation("RCConsigneeLocation", fields: [consigneeLocationId], references: [id])
+  legs              RequestCargoLeg[]
 
   @@index([requestId])
 }
@@ -889,7 +926,9 @@ model RequestCargoLeg {
   pickupLocationId  String?
   dropoffLocationId String?
   plannedPickup     DateTime?
+  plannedPickupTo   String?
   plannedDropoff    DateTime?
+  plannedDropoffTo  String?
   cost              Decimal?  @db.Decimal(12, 2)
   discount          Decimal?  @db.Decimal(12, 2)
   finalCost         Decimal?  @db.Decimal(12, 2)

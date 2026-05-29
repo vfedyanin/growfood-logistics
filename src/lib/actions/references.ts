@@ -1,6 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
+import { serialize } from '@/lib/serialize';
 import { requireAuth, requirePermission, getActorId } from '@/lib/authz';
 import { revalidatePath } from 'next/cache';
 
@@ -32,7 +33,7 @@ export async function deleteVertical(code: string) {
 // ============ Locations ============
 export async function getLocations() {
   await requireAuth();
-  return prisma.location.findMany({ orderBy: { name: 'asc' } });
+  return serialize(await prisma.location.findMany({ orderBy: { name: 'asc' } }));
 }
 export async function createLocation(data: any) {
   await requirePermission(W);
@@ -77,6 +78,35 @@ export async function deleteCustomer(id: string) {
   await requirePermission(W);
   await prisma.customer.delete({ where: { id } });
   revalidatePath('/references/customers');
+}
+
+export async function getCustomerDeliveryLocations(customerId: string) {
+  await requireAuth();
+  return prisma.customerDeliveryLocation.findMany({
+    where: { customerId },
+    include: { location: { select: { id: true, code: true, name: true, city: true, type: true } } },
+    orderBy: { location: { name: 'asc' } },
+  });
+}
+
+export async function addCustomerDeliveryLocation(customerId: string, locationId: string, tariffMethod?: string, tariffAmount?: number) {
+  await requirePermission(W);
+  return prisma.customerDeliveryLocation.create({
+    data: { customerId, locationId, tariffMethod: tariffMethod as any, tariffAmount: tariffAmount ?? null },
+  });
+}
+
+export async function updateCustomerDeliveryLocationTariff(customerId: string, locationId: string, tariffMethod: string | null, tariffAmount: number | null) {
+  await requirePermission(W);
+  return prisma.customerDeliveryLocation.updateMany({
+    where: { customerId, locationId },
+    data: { tariffMethod: tariffMethod as any, tariffAmount: tariffAmount },
+  });
+}
+
+export async function removeCustomerDeliveryLocation(customerId: string, locationId: string) {
+  await requirePermission(W);
+  return prisma.customerDeliveryLocation.deleteMany({ where: { customerId, locationId } });
 }
 
 // ============ Carriers ============
@@ -130,7 +160,7 @@ export async function deleteVehicleType(code: string) {
 // ============ Vehicles ============
 export async function getVehicles() {
   await requireAuth();
-  return prisma.vehicle.findMany({ include: { vehicleType: true, carrier: true }, orderBy: { plateNumber: 'asc' } });
+  return serialize(await prisma.vehicle.findMany({ include: { vehicleType: true, carrier: true }, orderBy: { plateNumber: 'asc' } }));
 }
 export async function createVehicle(data: any) {
   await requirePermission(W);
@@ -180,7 +210,7 @@ export async function deleteDriver(id: string) {
 // ============ Routes ============
 export async function getRoutes() {
   await requireAuth();
-  return prisma.route.findMany({ include: { origin: true, destination: true }, orderBy: { code: 'asc' } });
+  return serialize(await prisma.route.findMany({ include: { origin: true, destination: true }, orderBy: { code: 'asc' } }));
 }
 export async function createRoute(data: any) {
   await requirePermission(W);

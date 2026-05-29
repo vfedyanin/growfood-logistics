@@ -1,34 +1,35 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Button, Form, Input, InputNumber, Select, DatePicker, Space, Popconfirm, Tag, message,
-  Divider, Card, Dropdown, Modal, Typography, Descriptions, Table, Empty,
+  Button, Form, InputNumber, Select, DatePicker, Space, Popconfirm, Tag, message,
+  Divider, Card, Dropdown, Modal, Typography, Descriptions, Table, Empty, Input,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, MoreOutlined, MinusCircleOutlined,
-  EyeOutlined, LoginOutlined, LogoutOutlined, WarningOutlined, DollarOutlined,
+  EyeOutlined, LoginOutlined, LogoutOutlined, WarningOutlined, DollarOutlined, HolderOutlined,
 } from '@ant-design/icons';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import EntityForm from '@/components/EntityForm';
 import FilterBar from '@/components/FilterBar';
 import {
-  RouteSelect, LocationSelect, CarrierSelect,
-  CustomerSelect, VerticalSelect,
+  CarrierSelect, CustomerSelect, VehicleTypeSelect,
 } from '@/components/selects/EntitySelects';
 import { VehicleSelectCreatable, DriverSelectCreatable } from '@/components/selects/CreatableSelects';
 import {
   getTrips, getTrip, createTrip, updateTrip, deleteTrip, changeTripStatus,
-  recordDeparture, recordArrival, completeTripQuick, addTripCargoUnit, removeTripCargoUnit, addQualityEvent, calculateTripEconomics, previewTripEconomics,
+  recordDeparture, recordArrival, completeTripQuick,
+  addTripCargoUnit, removeTripCargoUnit, addQualityEvent, calculateTripEconomics,
 } from '@/lib/actions/trips';
-import { getRoutes } from '@/lib/actions/references';
-import {
-  getTripTemplates, getTripTemplate, createTripTemplate, updateTripTemplate, deleteTripTemplate,
-} from '@/lib/actions/templates';
 import { usePermissions } from '@/hooks/usePermissions';
 import AsyncSelect from '@/components/selects/AsyncSelect';
-import { addCargoLegToTrip, getUnassignedCargoLegOptions } from '@/lib/actions/requests';
+import { addCargoLegToTrip, getUnassignedCargoLegOptions, getCargoLegDates } from '@/lib/actions/requests';
+import { getTripTemplates, getTripTemplate, createTripTemplate, updateTripTemplate, deleteTripTemplate } from '@/lib/actions/templates';
 
 const { Text } = Typography;
 
@@ -44,7 +45,6 @@ const tripTypeOptions = [
   { value: 'LAAS', label: 'LAAS (услуга КА)' },
   { value: 'CONSOLIDATED', label: 'Консолидированный' },
 ];
-const vatOptions = [{ value: 0, label: '0%' }, { value: 5, label: '5%' }, { value: 22, label: '22%' }];
 const unitTypeOptions = [{ value: 'PALLET', label: 'Паллета' }, { value: 'BOX', label: 'Короб' }, { value: 'CARTON', label: 'Коробка' }];
 const productCatOptions = [
   { value: 'READY_FOOD', label: 'Готовая еда' }, { value: 'RAW', label: 'Сырьё' },
@@ -60,9 +60,24 @@ const eventTypeOptions = [
 const severityOptions = [
   { value: 'MINOR', label: 'Незначительная' }, { value: 'MAJOR', label: 'Серьёзная' }, { value: 'CRITICAL', label: 'Критическая' },
 ];
+const opTypeOptions = [{ value: 'LOADING', label: 'Загрузка' }, { value: 'UNLOADING', label: 'Выгрузка' }];
 
 const dt = (d: any) => (d ? dayjs(d).format('DD.MM.YYYY HH:mm') : '—');
 const money = (v: any) => (v != null ? Number(v).toLocaleString('ru') + ' ₽' : '—');
+
+// Drag-and-drop сортируемая строка маршрута
+function SortableRouteRow({ id, children }: { id: string; children: (listeners: any) => React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
+      {...attributes}
+    >
+      {children(listeners)}
+    </div>
+  );
+}
 
 export default function TripsPage() {
   const { can, roles, isAdmin } = usePermissions();
@@ -70,7 +85,6 @@ export default function TripsPage() {
   const canStatus = canWrite || can('trips.status');
   const canCargo = canWrite || can('cargo.write');
   const canQuality = canWrite || can('quality.write');
-  // Диспетчеры ограничены своим типом рейса (как и серверный скоуп)
   const forcedTripType: 'OWN' | 'LAAS' | null = (() => {
     if (isAdmin || roles.includes('LOGISTICS_MANAGER')) return null;
     const laas = roles.includes('LAAS_MANAGER');
@@ -81,7 +95,6 @@ export default function TripsPage() {
   })();
 
   const [data, setData] = useState<any[]>([]);
-  const [routes, setRoutes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
@@ -89,9 +102,6 @@ export default function TripsPage() {
   const [existingCargo, setExistingCargo] = useState<any[]>([]);
   const [removeIds, setRemoveIds] = useState<string[]>([]);
   const toggleRemove = (id: string) => setRemoveIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
-  const [computedCost, setComputedCost] = useState<number | null>(null);
-  const [economicsBasis, setEconomicsBasis] = useState<string>('');
-  const [calcBusy, setCalcBusy] = useState(false);
 
   // фильтры
   const [fStatus, setFStatus] = useState<string>();
@@ -111,12 +121,8 @@ export default function TripsPage() {
   const [qOpen, setQOpen] = useState(false);
   const [cargoForm] = Form.useForm();
   const [cargoOpen, setCargoOpen] = useState(false);
-
-  // привязка существующего груза из заявки (в карточке)
   const [attachForm] = Form.useForm();
   const [attachOpen, setAttachOpen] = useState(false);
-
-  // быстрое завершение из списка
   const [completeForm] = Form.useForm();
   const [completeOpen, setCompleteOpen] = useState(false);
   const [completingTrip, setCompletingTrip] = useState<any>(null);
@@ -128,35 +134,28 @@ export default function TripsPage() {
   const [tplSaveOpen, setTplSaveOpen] = useState(false);
 
   const loadTemplates = async () => { setTemplates(await getTripTemplates()); };
-  useEffect(() => { loadTemplates(); }, []);
+  useEffect(() => { loadTemplates(); }, []); // eslint-disable-line
 
   const applyTemplate = async (id?: string) => {
     setSelTemplate(id);
     if (!id) return;
     const tpl = await getTripTemplate(id);
     const d: any = tpl?.data || {};
-    form.setFieldsValue({
-      ...d,
-      plannedDeparture: d.plannedDeparture ? dayjs(d.plannedDeparture) : null,
-      plannedArrival: d.plannedArrival ? dayjs(d.plannedArrival) : null,
-      cargoUnits: d.cargoUnits || [],
-    });
+    form.setFieldsValue({ ...d, routeStops: [] });
     message.success(`Форма заполнена из шаблона «${tpl?.name}»`);
   };
+
   const openSaveTemplate = () => {
     const cur = templates.find((t) => t.id === selTemplate);
     tplForm.resetFields();
     tplForm.setFieldsValue({ name: cur?.name });
     setTplSaveOpen(true);
   };
+
   const submitSaveTemplate = async () => {
     const { name } = await tplForm.validateFields();
     const v = form.getFieldsValue(true);
-    const data = {
-      ...v,
-      plannedDeparture: v.plannedDeparture ? v.plannedDeparture.toISOString() : null,
-      plannedArrival: v.plannedArrival ? v.plannedArrival.toISOString() : null,
-    };
+    const data = { ...v, routeStops: [] };
     try {
       const existing = templates.find((t) => t.name === name);
       if (existing) { await updateTripTemplate(existing.id, { name, data }); setSelTemplate(existing.id); }
@@ -164,16 +163,24 @@ export default function TripsPage() {
       message.success('Шаблон сохранён'); setTplSaveOpen(false); loadTemplates();
     } catch (e: any) { message.error(e?.message || 'Ошибка'); }
   };
+
   const deleteSelectedTemplate = async () => {
     if (!selTemplate) return;
     try { await deleteTripTemplate(selTemplate); message.success('Шаблон удалён'); setSelTemplate(undefined); loadTemplates(); }
     catch (e: any) { message.error(e?.message || 'Ошибка'); }
   };
 
-  const tripType = Form.useWatch('tripType', form);
-  const routeId = Form.useWatch('routeId', form);
-  const shipperId = Form.useWatch('shipperId', form);
-  const consigneeId = Form.useWatch('consigneeId', form);
+  // dnd sensors
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleRouteDragEnd = (event: DragEndEvent, fields: any[], move: (from: number, to: number) => void) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      const oldIdx = fields.findIndex(f => String(f.key) === String(active.id));
+      const newIdx = fields.findIndex(f => String(f.key) === String(over.id));
+      if (oldIdx !== -1 && newIdx !== -1) move(oldIdx, newIdx);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -183,64 +190,41 @@ export default function TripsPage() {
       if (fType) filters.tripType = fType;
       if (fRange?.[0]) filters.dateFrom = fRange[0].startOf('day').toISOString();
       if (fRange?.[1]) filters.dateTo = fRange[1].endOf('day').toISOString();
-      const [trips, rts] = await Promise.all([getTrips(filters), getRoutes()]);
-      setData(trips);
-      setRoutes(rts);
+      setData(await getTrips(filters));
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [fStatus, fType, fRange]);
-
-  const routeMap = useMemo(() => Object.fromEntries(routes.map((r) => [r.id, r])), [routes]);
-
-  useEffect(() => {
-    if (routeId && routeMap[routeId]) {
-      form.setFieldsValue({ originId: routeMap[routeId].originId, destinationId: routeMap[routeId].destinationId });
-    }
-    // eslint-disable-next-line
-  }, [routeId]);
-
-  useEffect(() => {
-    if (tripType === 'LAAS' && shipperId) form.setFieldValue('payerId', shipperId);
-    else if (tripType === 'OWN' && consigneeId) form.setFieldValue('payerId', consigneeId);
-    // eslint-disable-next-line
-  }, [tripType, shipperId, consigneeId]);
 
   const refreshView = async (id: string) => { setViewTrip(await getTrip(id)); };
 
   const onAdd = () => {
     setEditing(null);
-    setSelTemplate(undefined);
     setExistingCargo([]); setRemoveIds([]);
-    setComputedCost(null); setEconomicsBasis('');
+    setSelTemplate(undefined);
     form.resetFields();
-    form.setFieldsValue({ tripType: forcedTripType || 'OWN', cargoUnits: [], attachCargoIds: [] });
+    form.setFieldsValue({ tripType: forcedTripType || 'OWN', routeStops: [] });
     setOpen(true);
   };
+
   const onEdit = async (r: any) => {
     const full = await getTrip(r.id);
     setEditing(full ?? r);
     setExistingCargo(full?.cargoUnits ?? []); setRemoveIds([]);
-    setComputedCost(full?.actualCost != null ? Number(full.actualCost) : null);
-    setEconomicsBasis('');
-    form.setFieldsValue({
-      ...(full ?? r),
-      actualCost: full?.actualCost != null ? Number(full.actualCost) : null,
-      plannedWeightKg: full?.plannedWeightKg != null ? Number(full.plannedWeightKg) : null,
-      plannedDeparture: full?.plannedDeparture ? dayjs(full.plannedDeparture) : null,
-      plannedArrival: full?.plannedArrival ? dayjs(full.plannedArrival) : null,
-      cargoUnits: [], // здесь — только НОВЫЕ ручные грузы; существующие показаны отдельно
-      attachCargoIds: [],
-    });
+    setSelTemplate(undefined);
+    form.setFieldsValue({ ...(full ?? r), routeStops: [] });
     setOpen(true);
   };
+
   const onDelete = async (id: string) => {
     try { await deleteTrip(id); message.success('Рейс удалён'); load(); }
     catch (e: any) { message.error(e?.message || 'Ошибка удаления'); }
   };
+
   const onStatus = async (id: string, to: string) => {
     try { await changeTripStatus(id, to as any); message.success('Статус изменён'); load(); if (viewTrip?.id === id) refreshView(id); }
     catch (e: any) { message.error(e?.message || 'Ошибка перехода'); }
   };
+
   const openComplete = (r: any) => {
     setCompletingTrip(r);
     completeForm.resetFields();
@@ -251,6 +235,7 @@ export default function TripsPage() {
     });
     setCompleteOpen(true);
   };
+
   const submitComplete = async () => {
     const v = await completeForm.validateFields();
     try {
@@ -264,22 +249,18 @@ export default function TripsPage() {
       if (viewTrip?.id === completingTrip.id) refreshView(completingTrip.id);
     } catch (e: any) { message.error(e?.message || 'Ошибка завершения'); }
   };
+
   const onSubmit = async () => {
     const v = await form.validateFields();
-    const { attachCargoIds = [], cargoUnits = [], ...header } = v;
-    const payload = {
-      ...header,
-      cargoUnits,
-      plannedDeparture: v.plannedDeparture ? v.plannedDeparture.toISOString() : null,
-      plannedArrival: v.plannedArrival ? v.plannedArrival.toISOString() : null,
-    };
+    const { routeStops = [], ...header } = v;
+    const attachCargoIds = (routeStops as any[]).map((s: any) => s.cargoId).filter(Boolean);
     try {
       let tripId = editing?.id;
       if (editing) {
-        await updateTrip(editing.id, payload);
+        await updateTrip(editing.id, header);
         for (const rid of removeIds) await removeTripCargoUnit(rid, editing.id);
       } else {
-        const trip = await createTrip(payload);
+        const trip = await createTrip(header);
         tripId = (trip as any)?.id;
       }
       for (const aid of attachCargoIds) if (tripId) await addCargoLegToTrip(aid, tripId);
@@ -287,29 +268,8 @@ export default function TripsPage() {
     } catch (e: any) { message.error(e?.message || 'Ошибка сохранения'); }
   };
 
-  const onPreviewEconomics = async () => {
-    const v = form.getFieldsValue();
-    const newPallets = (v.cargoUnits || []).reduce((s: number, c: any) => s + (Number(c?.pallets) || 0), 0);
-    const existPallets = existingCargo.reduce((s: number, c: any) => s + (c.pallets || 0), 0);
-    setCalcBusy(true);
-    try {
-      const r = await previewTripEconomics({
-        carrierId: v.carrierId,
-        vehicleId: v.vehicleId,
-        routeId: v.routeId,
-        plannedDeparture: v.plannedDeparture ? v.plannedDeparture.toISOString() : undefined,
-        pallets: newPallets + existPallets,
-      });
-      setComputedCost(r.cost); setEconomicsBasis(r.basis);
-      form.setFieldsValue({ actualCost: r.cost });
-      message.success(`Себестоимость по тарифу (${r.basis}): ${money(r.cost)}`);
-    } catch (e: any) { message.error(e?.message || 'Ошибка расчёта'); }
-    finally { setCalcBusy(false); }
-  };
-
   const openView = async (r: any) => { setViewTrip(await getTrip(r.id)); setViewOpen(true); };
 
-  // отправление
   const openDeparture = () => { depForm.resetFields(); depForm.setFieldsValue({ actualDeparture: dayjs() }); setDepOpen(true); };
   const submitDeparture = async () => {
     const v = await depForm.validateFields();
@@ -318,7 +278,7 @@ export default function TripsPage() {
       message.success('Отправление зафиксировано'); setDepOpen(false); load(); refreshView(viewTrip.id);
     } catch (e: any) { message.error(e?.message || 'Ошибка'); }
   };
-  // приёмка
+
   const openArrival = () => { arrForm.resetFields(); arrForm.setFieldsValue({ actualArrival: dayjs() }); setArrOpen(true); };
   const submitArrival = async () => {
     const v = await arrForm.validateFields();
@@ -332,7 +292,7 @@ export default function TripsPage() {
       message.success('Приёмка зафиксирована'); setArrOpen(false); load(); refreshView(viewTrip.id);
     } catch (e: any) { message.error(e?.message || 'Ошибка'); }
   };
-  // качество
+
   const openQuality = () => { qForm.resetFields(); qForm.setFieldsValue({ severity: 'MINOR', eventTime: dayjs() }); setQOpen(true); };
   const submitQuality = async () => {
     const v = await qForm.validateFields();
@@ -341,7 +301,7 @@ export default function TripsPage() {
       message.success('Инцидент зарегистрирован'); setQOpen(false); refreshView(viewTrip.id);
     } catch (e: any) { message.error(e?.message || 'Ошибка'); }
   };
-  // груз в карточке
+
   const openCargo = () => { cargoForm.resetFields(); cargoForm.setFieldsValue({ unitType: 'PALLET' }); setCargoOpen(true); };
   const submitCargo = async () => {
     const v = await cargoForm.validateFields();
@@ -373,27 +333,44 @@ export default function TripsPage() {
     return items;
   };
 
+  const sortedByPickup = (units: any[]) =>
+    [...units].filter(c => c.requestCargoLeg?.plannedPickup)
+      .sort((a, b) => new Date(a.requestCargoLeg.plannedPickup).getTime() - new Date(b.requestCargoLeg.plannedPickup).getTime());
+  const sortedByDropoff = (units: any[]) =>
+    [...units].filter(c => c.requestCargoLeg?.plannedDropoff)
+      .sort((a, b) => new Date(b.requestCargoLeg.plannedDropoff).getTime() - new Date(a.requestCargoLeg.plannedDropoff).getTime());
+
   const columns = [
     { title: '№ рейса', dataIndex: 'tripNumber', key: 'tripNumber', width: 160 },
-    { title: 'Тип', dataIndex: 'tripType', key: 'tripType', render: (t: string) => <Tag>{tripTypeOptions.find((o) => o.value === t)?.label?.split(' ')[0]}</Tag> },
-    { title: 'Маршрут', key: 'route', render: (_: any, r: any) => `${r.origin?.name || '—'} → ${r.destination?.name || '—'}` },
-    { title: 'Статус', dataIndex: 'status', key: 'status', render: (s: string) => <Tag color={statusCfg[s]?.color}>{statusCfg[s]?.label || s}</Tag> },
-    { title: 'Перевозчик', key: 'carrier', render: (_: any, r: any) => r.carrier?.name || '—', responsive: ['lg'] as any },
-    { title: 'Плательщик', key: 'payer', render: (_: any, r: any) => r.payer?.name || '—', responsive: ['lg'] as any },
-    { title: 'Вместимость, пал', key: 'cap', width: 130, responsive: ['lg'] as any, render: (_: any, r: any) => r.vehicle?.vehicleType?.capacityPallets ?? '—' },
+    { title: 'Тип', dataIndex: 'tripType', key: 'tripType', width: 80, render: (t: string) => <Tag>{tripTypeOptions.find((o) => o.value === t)?.label?.split(' ')[0]}</Tag> },
     {
-      title: 'Загрузка, пал', key: 'load', width: 150,
+      title: 'Маршрут', key: 'route',
       render: (_: any, r: any) => {
-        const cap = r.vehicle?.vehicleType?.capacityPallets;
-        const loaded = (r.cargoUnits || []).reduce((s: number, c: any) => s + (c.pallets || 0), 0);
-        if (!cap) return loaded ? `${loaded} / —` : '—';
-        const pct = Math.round((loaded / cap) * 100);
-        const color = pct > 100 ? 'red' : pct >= 80 ? 'green' : pct >= 60 ? 'gold' : 'default';
-        return <Tag color={color}>{loaded} / {cap} ({pct}%)</Tag>;
+        const first = sortedByPickup(r.cargoUnits || [])[0];
+        const last  = sortedByDropoff(r.cargoUnits || [])[0];
+        const from = first?.requestCargoLeg?.pickupLocation?.name || '—';
+        const to   = last?.requestCargoLeg?.dropoffLocation?.name || '—';
+        return `${from} → ${to}`;
       },
     },
-    { title: 'Стоимость', dataIndex: 'actualCost', key: 'cost', render: money, width: 120 },
-    { title: 'Выезд (план)', dataIndex: 'plannedDeparture', key: 'pd', render: dt, responsive: ['lg'] as any },
+    {
+      title: 'Дата начала', key: 'dateStart', width: 120,
+      render: (_: any, r: any) => {
+        const first = sortedByPickup(r.cargoUnits || [])[0];
+        return first?.requestCargoLeg?.plannedPickup ? dayjs(first.requestCargoLeg.plannedPickup).format('DD.MM HH:mm') : '—';
+      },
+    },
+    {
+      title: 'Дата конца', key: 'dateEnd', width: 120,
+      render: (_: any, r: any) => {
+        const last = sortedByDropoff(r.cargoUnits || [])[0];
+        return last?.requestCargoLeg?.plannedDropoff ? dayjs(last.requestCargoLeg.plannedDropoff).format('DD.MM HH:mm') : '—';
+      },
+    },
+    { title: 'Статус', dataIndex: 'status', key: 'status', width: 120, render: (s: string) => <Tag color={statusCfg[s]?.color}>{statusCfg[s]?.label || s}</Tag> },
+    { title: 'Перевозчик', key: 'carrier', render: (_: any, r: any) => r.carrier?.name || '—', responsive: ['lg'] as any },
+    { title: 'ТС', key: 'vehicle', render: (_: any, r: any) => r.vehicle?.plateNumber || '—', responsive: ['lg'] as any },
+    { title: 'Водитель', key: 'driver', render: (_: any, r: any) => r.driver?.fullName || '—', responsive: ['lg'] as any },
     {
       title: 'Действия', key: 'actions', width: 150,
       render: (_: any, r: any) => (
@@ -416,15 +393,16 @@ export default function TripsPage() {
   ];
 
   const cargoColumns = [
-    { title: 'Получатель', key: 'cust', render: (_: any, c: any) => c.customer?.name || '—' },
-    { title: 'Вертикаль', key: 'vert', render: (_: any, c: any) => c.vertical?.name || c.verticalCode || '—' },
-    { title: 'Тип', dataIndex: 'unitType', key: 'ut', render: (t: string) => unitTypeOptions.find((o) => o.value === t)?.label || t },
-    { title: 'Паллет', dataIndex: 'pallets', key: 'p', render: (v: any) => v ?? '—' },
-    { title: 'Лотков', dataIndex: 'traysCount', key: 'tr', render: (v: any) => v ?? '—' },
-    { title: 'Доля', dataIndex: 'costSharePct', key: 'sh', render: (v: any) => v != null ? (Number(v) * 100).toFixed(1) + '%' : '—' },
-    { title: 'Аллок. стоимость', dataIndex: 'allocatedCost', key: 'ac', render: money },
+    { title: '#', key: 'idx', width: 40, render: (_: any, __: any, i: number) => i + 1 },
+    { title: 'Заказчик', key: 'cust', render: (_: any, c: any) => c.customer?.name || '—' },
+    { title: 'Откуда (загрузка)', key: 'from', render: (_: any, c: any) => c.requestCargoLeg?.pickupLocation?.name || '—' },
+    { title: 'Куда (выгрузка)', key: 'to', render: (_: any, c: any) => c.requestCargoLeg?.dropoffLocation?.name || '—' },
+    { title: 'Пал.', dataIndex: 'pallets', key: 'p', width: 55, render: (v: any) => v ?? '—' },
+    { title: 'Дата загрузки', key: 'pd', render: (_: any, c: any) => dt(c.requestCargoLeg?.plannedPickup) },
+    { title: 'Дата выгрузки', key: 'dd', render: (_: any, c: any) => dt(c.requestCargoLeg?.plannedDropoff) },
+    { title: 'Аллок.', dataIndex: 'allocatedCost', key: 'ac', render: money },
     {
-      title: '', key: 'x', width: 50,
+      title: '', key: 'x', width: 40,
       render: (_: any, c: any) => canCargo ? (
         <Popconfirm title="Убрать груз?" onConfirm={() => removeCargo(c.id)}>
           <Button type="link" danger size="small" icon={<DeleteOutlined />} />
@@ -432,6 +410,27 @@ export default function TripsPage() {
       ) : null,
     },
   ];
+
+  const onCargoSelect = async (legId: any, rowName: number) => {
+    if (!legId) return;
+    const dates = await getCargoLegDates(legId);
+    if (dates) {
+      form.setFieldValue(['routeStops', rowName, 'loadDate'], dates.plannedPickup ? dayjs(dates.plannedPickup) : null);
+      form.setFieldValue(['routeStops', rowName, 'unloadDate'], dates.plannedDropoff ? dayjs(dates.plannedDropoff) : null);
+    }
+  };
+
+  // Заголовок таблицы маршрута
+  const routeTableHeader = (
+    <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 110px 150px 150px 32px', gap: 8, padding: '0 0 6px 0', borderBottom: '1px solid #f0f0f0', marginBottom: 6, fontWeight: 600, fontSize: 12, color: '#666' }}>
+      <div />
+      <div>Груз</div>
+      <div>Тип</div>
+      <div>Дата загрузки</div>
+      <div>Дата выгрузки</div>
+      <div />
+    </div>
+  );
 
   return (
     <>
@@ -442,109 +441,104 @@ export default function TripsPage() {
         <DatePicker.RangePicker value={fRange} onChange={setFRange} format="DD.MM.YYYY" />
       </FilterBar>
 
-      <DataTable title="Рейсы" data={data} columns={columns} loading={loading} scrollX={1150}
+      <DataTable title="Рейсы" data={data} columns={columns} loading={loading} scrollX={1100}
         searchableKeys={['tripNumber']}
         toolbar={canWrite ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Создать рейс</Button> : undefined} />
 
-      {/* ===== Create / Edit ===== */}
+      {/* ===== Создание / редактирование ===== */}
       <EntityForm open={open} title={editing ? `Рейс ${editing.tripNumber}` : 'Новый рейс'} form={form}
-        onSubmit={onSubmit} onCancel={() => setOpen(false)} width={760} isEditing={!!editing}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', padding: 8, background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, marginBottom: 12 }}>
-          <Text type="secondary">Шаблон:</Text>
-          <Select placeholder="Заполнить из шаблона" style={{ minWidth: 240 }} allowClear
-            value={selTemplate} onChange={(v) => applyTemplate(v)}
-            options={templates.map((t) => ({ value: t.id, label: t.name }))} />
-          <Button onClick={openSaveTemplate}>Сохранить как шаблон</Button>
-          {selTemplate && (
-            <Popconfirm title="Удалить шаблон?" onConfirm={deleteSelectedTemplate}>
-              <Button danger>Удалить шаблон</Button>
-            </Popconfirm>
-          )}
-        </div>
-        <Divider titlePlacement="left">Основное</Divider>
+        onSubmit={onSubmit} onCancel={() => setOpen(false)} width={1100} isEditing={!!editing}>
+
+        {!editing && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', padding: '8px 12px', background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, marginBottom: 16 }}>
+            <Text type="secondary">Шаблон:</Text>
+            <Select placeholder="Заполнить из шаблона" style={{ minWidth: 240 }} allowClear
+              value={selTemplate} onChange={(v) => applyTemplate(v)}
+              options={templates.map((t) => ({ value: t.id, label: t.name }))} />
+            <Button onClick={openSaveTemplate}>Сохранить как шаблон</Button>
+            {selTemplate && (
+              <Popconfirm title="Удалить шаблон?" onConfirm={deleteSelectedTemplate}>
+                <Button danger>Удалить шаблон</Button>
+              </Popconfirm>
+            )}
+          </div>
+        )}
+        <Divider titlePlacement="left">Шапка</Divider>
         <Space wrap size="large">
-          <Form.Item name="tripType" label="Тип рейса" rules={[{ required: true }]}><Select style={{ width: 220 }} options={tripTypeOptions} disabled={!!forcedTripType} /></Form.Item>
-          <Form.Item name="verticalCode" label="Вертикаль"><VerticalSelect style={{ width: 220 }} /></Form.Item>
-        </Space>
-        <Divider titlePlacement="left">Маршрут</Divider>
-        <Form.Item name="routeId" label="Маршрут (опц. — подставит точки)"><RouteSelect style={{ width: '100%' }} /></Form.Item>
-        <Space wrap size="large">
-          <Form.Item name="originId" label="Откуда" rules={[{ required: true }]}><LocationSelect style={{ width: 340 }} /></Form.Item>
-          <Form.Item name="destinationId" label="Куда" rules={[{ required: true }]}><LocationSelect style={{ width: 340 }} /></Form.Item>
-        </Space>
-        <Divider titlePlacement="left">Транспорт</Divider>
-        <Space wrap size="large">
+          <Form.Item name="tripType" label="Тип рейса" rules={[{ required: true, message: 'Укажите тип' }]}>
+            <Select options={tripTypeOptions} style={{ width: 200 }} disabled={!!forcedTripType} />
+          </Form.Item>
           <Form.Item name="carrierId" label="Перевозчик"><CarrierSelect style={{ width: 220 }} /></Form.Item>
           <Form.Item name="vehicleId" label="ТС"><VehicleSelectCreatable style={{ width: 220 }} /></Form.Item>
           <Form.Item name="driverId" label="Водитель"><DriverSelectCreatable style={{ width: 220 }} /></Form.Item>
+          <Form.Item name="vehicleTypeCode" label="Тип ТС"><VehicleTypeSelect style={{ width: 180 }} /></Form.Item>
         </Space>
-        <Divider titlePlacement="left">Стороны</Divider>
-        <Space wrap size="large">
-          <Form.Item name="shipperId" label="Грузоотправитель"><CustomerSelect partyRole="SHIPPER" style={{ width: 220 }} /></Form.Item>
-          <Form.Item name="consigneeId" label="Грузополучатель"><CustomerSelect partyRole="CONSIGNEE" style={{ width: 220 }} /></Form.Item>
-          <Form.Item name="payerId" label="Плательщик" tooltip="Авто: LAAS → отправитель, OWN → получатель. Можно изменить вручную."><CustomerSelect style={{ width: 220 }} /></Form.Item>
-        </Space>
-        <Divider titlePlacement="left">Время (план)</Divider>
-        <Space wrap size="large">
-          <Form.Item name="plannedDeparture" label="Плановый выезд"><DatePicker showTime format="DD.MM.YYYY HH:mm" /></Form.Item>
-          <Form.Item name="plannedArrival" label="Плановое прибытие"
-            dependencies={['plannedDeparture']}
-            rules={[({ getFieldValue }) => ({ validator(_, value) {
-              const dep = getFieldValue('plannedDeparture');
-              if (value && dep && value.isBefore(dep)) return Promise.reject(new Error('Прибытие раньше выезда'));
-              return Promise.resolve();
-            } })]}
-          ><DatePicker showTime format="DD.MM.YYYY HH:mm" /></Form.Item>
-        </Space>
-        <Divider titlePlacement="left">Экономика рейса</Divider>
-        <Space align="center" wrap>
-          <Button icon={<DollarOutlined />} loading={calcBusy} onClick={onPreviewEconomics}>Рассчитать</Button>
-          <Text>Себестоимость по тарифу: <b>{computedCost != null ? money(computedCost) : '—'}</b>{economicsBasis ? ` (${economicsBasis})` : ''}</Text>
-        </Space>
-        <Form.Item name="actualCost" hidden><InputNumber /></Form.Item>
-        <Text type="secondary" style={{ display: 'block', marginTop: 4 }}>Расчёт по тарифам перевозчика на тип ТС и дату планового выезда.</Text>
-        <Form.Item name="notes" label="Примечания" style={{ marginTop: 12 }}><Input.TextArea rows={2} /></Form.Item>
-        <Divider titlePlacement="left">Грузы (для аллокации по лоткам)</Divider>
-        {editing && existingCargo.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <Text strong>Текущие грузы рейса</Text>
-            {existingCargo.map((c: any) => {
-              const removed = removeIds.includes(c.id);
-              return (
-                <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0' }}>
-                  <span style={{ textDecoration: removed ? 'line-through' : 'none', opacity: removed ? 0.5 : 1 }}>
-                    {(c.customer?.name || '—')} · {c.unitType} · {c.pallets ?? '—'}пал/{c.traysCount ?? '—'}лот
-                  </span>
-                  {c.requestId && c.request ? <Tag color="purple">из заявки {c.request.requestNumber}</Tag> : null}
-                  <Button size="small" type="link" danger={!removed} onClick={() => toggleRemove(c.id)}>{removed ? 'Отменить' : 'Убрать'}</Button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        <Form.Item name="attachCargoIds" label="Привязать грузы без рейса (из заявок/списка грузов)">
-          <AsyncSelect mode="multiple" fetchOptions={() => getUnassignedCargoLegOptions()} placeholder="Выберите грузы из списка" style={{ width: '100%' }} />
-        </Form.Item>
-        <Text type="secondary">Новые ручные грузы:</Text>
-        <Form.List name="cargoUnits">
-          {(fields, { add, remove }) => (
+
+        <Divider titlePlacement="left">Маршрут</Divider>
+        {routeTableHeader}
+
+        {/* Существующие грузы (режим редактирования) */}
+        {editing && existingCargo.map((c: any) => {
+          const removed = removeIds.includes(c.id);
+          return (
+            <div key={c.id} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 110px 150px 150px 32px', gap: 8, alignItems: 'center', marginBottom: 4, opacity: removed ? 0.4 : 1, background: '#fafafa', padding: '4px 0', borderRadius: 4 }}>
+              <HolderOutlined style={{ color: '#ccc', justifySelf: 'center' }} />
+              <span style={{ textDecoration: removed ? 'line-through' : 'none', fontSize: 13 }}>
+                {c.customer?.name || '—'} · {c.pallets ?? '—'} пал
+                {c.requestId && <Tag color="purple" style={{ marginLeft: 6, fontSize: 11 }}>из заявки</Tag>}
+              </span>
+              <span style={{ color: '#999', fontSize: 12 }}>—</span>
+              <span style={{ color: '#999', fontSize: 12 }}>—</span>
+              <span style={{ color: '#999', fontSize: 12 }}>—</span>
+              <Button size="small" type="link" danger={!removed} onClick={() => toggleRemove(c.id)} style={{ padding: 0 }}>
+                {removed ? '↩' : <DeleteOutlined />}
+              </Button>
+            </div>
+          );
+        })}
+
+        {/* Новые строки маршрута с drag-and-drop */}
+        <Form.List name="routeStops">
+          {(fields, { add, remove, move }) => (
             <>
-              {fields.map(({ key, name, ...rest }) => (
-                <Card key={key} size="small" style={{ marginBottom: 8 }} title={`Груз №${name + 1}`}
-                  extra={<Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(name)} />}>
-                  <Space wrap size="middle">
-                    <Form.Item {...rest} name={[name, 'customerId']} label="Получатель части" rules={[{ required: true }]}><CustomerSelect style={{ width: 200 }} /></Form.Item>
-                    <Form.Item {...rest} name={[name, 'verticalCode']} label="Вертикаль"><VerticalSelect style={{ width: 160 }} /></Form.Item>
-                    <Form.Item {...rest} name={[name, 'unitType']} label="Тип ед." rules={[{ required: true }]} initialValue="PALLET"><Select style={{ width: 130 }} options={unitTypeOptions} /></Form.Item>
-                    <Form.Item {...rest} name={[name, 'pallets']} label="Паллет"><InputNumber min={0} style={{ width: 100 }} /></Form.Item>
-                    <Form.Item {...rest} name={[name, 'traysCount']} label="Лотков" tooltip="Используется для аллокации стоимости"><InputNumber min={0} style={{ width: 100 }} /></Form.Item>
-                    <Form.Item {...rest} name={[name, 'weightKg']} label="Вес (кг)"><InputNumber min={0} style={{ width: 110 }} /></Form.Item>
-                    <Form.Item {...rest} name={[name, 'productCategory']} label="Категория"><Select style={{ width: 150 }} options={productCatOptions} allowClear /></Form.Item>
-                    <Form.Item {...rest} name={[name, 'tempRegime']} label="Темп. режим"><Select style={{ width: 140 }} options={tempRegimeOptions} allowClear /></Form.Item>
-                  </Space>
-                </Card>
-              ))}
-              <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add({ unitType: 'PALLET' })}>Добавить груз</Button>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={(e) => handleRouteDragEnd(e, fields, move)}
+              >
+                <SortableContext items={fields.map(f => f.key.toString())} strategy={verticalListSortingStrategy}>
+                  {fields.map(({ key, name, ...rest }) => (
+                    <SortableRouteRow key={key} id={key.toString()}>
+                      {(listeners) => (
+                        <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 110px 150px 150px 32px', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                          <Button icon={<HolderOutlined />} type="text" size="small" {...listeners} style={{ cursor: 'grab', padding: 0, width: 28 }} />
+                          <Form.Item {...rest} name={[name, 'cargoId']} style={{ marginBottom: 0 }}>
+                            <AsyncSelect
+                              fetchOptions={getUnassignedCargoLegOptions}
+                              placeholder="Груз из заявки"
+                              style={{ width: '100%' }}
+                              onChange={(val: any) => onCargoSelect(val, name)}
+                            />
+                          </Form.Item>
+                          <Form.Item {...rest} name={[name, 'opType']} initialValue="LOADING" style={{ marginBottom: 0 }}>
+                            <Select options={opTypeOptions} style={{ width: '100%' }} />
+                          </Form.Item>
+                          <Form.Item {...rest} name={[name, 'loadDate']} style={{ marginBottom: 0 }}>
+                            <DatePicker format="DD.MM.YYYY HH:mm" showTime={{ format: 'HH:mm' }} style={{ width: '100%' }} />
+                          </Form.Item>
+                          <Form.Item {...rest} name={[name, 'unloadDate']} style={{ marginBottom: 0 }}>
+                            <DatePicker format="DD.MM.YYYY HH:mm" showTime={{ format: 'HH:mm' }} style={{ width: '100%' }} />
+                          </Form.Item>
+                          <Button type="text" danger size="small" icon={<DeleteOutlined />} onClick={() => remove(name)} style={{ padding: 0, width: 32 }} />
+                        </div>
+                      )}
+                    </SortableRouteRow>
+                  ))}
+                </SortableContext>
+              </DndContext>
+              <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add({ opType: 'LOADING' })} style={{ marginTop: 4 }}>
+                Добавить груз
+              </Button>
             </>
           )}
         </Form.List>
@@ -571,19 +565,15 @@ export default function TripsPage() {
 
             <Descriptions bordered size="small" column={2}>
               <Descriptions.Item label="Тип">{tripTypeOptions.find((o) => o.value === viewTrip.tripType)?.label}</Descriptions.Item>
-              <Descriptions.Item label="Вертикаль">{viewTrip.vertical?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Откуда">{viewTrip.origin?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Куда">{viewTrip.destination?.name || '—'}</Descriptions.Item>
               <Descriptions.Item label="Перевозчик">{viewTrip.carrier?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="ТС / Водитель">{(viewTrip.vehicle?.plateNumber || '—') + ' / ' + (viewTrip.driver?.fullName || '—')}</Descriptions.Item>
-              <Descriptions.Item label="Отправитель">{viewTrip.shipper?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Получатель">{viewTrip.consignee?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Плательщик">{viewTrip.payer?.name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="ТС">{viewTrip.vehicle?.plateNumber || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Водитель">{viewTrip.driver?.fullName || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Тип ТС">{viewTrip.vehicleType?.name || viewTrip.vehicle?.vehicleType?.name || '—'}</Descriptions.Item>
               <Descriptions.Item label="Факт. стоимость">{money(viewTrip.actualCost)}</Descriptions.Item>
+              <Descriptions.Item label="Откуда → Куда" span={2}>{(viewTrip.origin?.name || '—') + ' → ' + (viewTrip.destination?.name || '—')}</Descriptions.Item>
               <Descriptions.Item label="Выезд план / факт">{dt(viewTrip.plannedDeparture)} / {dt(viewTrip.actualDeparture)}</Descriptions.Item>
               <Descriptions.Item label="Прибытие план / факт">{dt(viewTrip.plannedArrival)} / {dt(viewTrip.actualArrival)}</Descriptions.Item>
-              <Descriptions.Item label="Паллет план / факт">{(viewTrip.plannedPallets ?? '—') + ' / ' + (viewTrip.actualPallets ?? '—')}</Descriptions.Item>
-              <Descriptions.Item label="Примечания">{viewTrip.notes || '—'}</Descriptions.Item>
+              {viewTrip.notes && <Descriptions.Item label="Примечания" span={2}>{viewTrip.notes}</Descriptions.Item>}
             </Descriptions>
 
             <Divider titlePlacement="left">Грузы</Divider>
@@ -594,7 +584,10 @@ export default function TripsPage() {
               </Space>
             )}
             <Table size="small" rowKey="id" pagination={false}
-              dataSource={viewTrip.cargoUnits || []} columns={cargoColumns}
+              dataSource={[...(viewTrip.cargoUnits || [])].sort((a: any, b: any) =>
+                (a.requestCargoLeg?.legOrder ?? 99) - (b.requestCargoLeg?.legOrder ?? 99)
+              )}
+              columns={cargoColumns}
               locale={{ emptyText: <Empty description="Нет грузов" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }} />
 
             <Divider titlePlacement="left">События качества</Divider>
@@ -650,11 +643,10 @@ export default function TripsPage() {
       <Modal open={cargoOpen} title="Добавить груз" onOk={submitCargo} onCancel={() => setCargoOpen(false)} okText="Добавить" cancelText="Отмена" width={520}>
         <Form form={cargoForm} layout="vertical">
           <Form.Item name="customerId" label="Получатель части" rules={[{ required: true }]}><CustomerSelect style={{ width: '100%' }} /></Form.Item>
-          <Form.Item name="verticalCode" label="Вертикаль"><VerticalSelect style={{ width: '100%' }} /></Form.Item>
           <Form.Item name="unitType" label="Тип единицы" rules={[{ required: true }]}><Select options={unitTypeOptions} /></Form.Item>
           <Space wrap>
             <Form.Item name="pallets" label="Паллет"><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
-            <Form.Item name="traysCount" label="Лотков" tooltip="Для аллокации стоимости"><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
+            <Form.Item name="traysCount" label="Лотков"><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
             <Form.Item name="weightKg" label="Вес (кг)"><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
           </Space>
           <Form.Item name="productCategory" label="Категория"><Select options={productCatOptions} allowClear /></Form.Item>
@@ -668,7 +660,6 @@ export default function TripsPage() {
           <Form.Item name="cargoId" label="Груз без рейса" rules={[{ required: true, message: 'Выберите груз' }]}>
             <AsyncSelect fetchOptions={() => getUnassignedCargoLegOptions()} placeholder="Выберите груз из заявки" style={{ width: '100%' }} />
           </Form.Item>
-          <Text type="secondary">Груз станет грузовой единицей этого рейса.</Text>
         </Form>
       </Modal>
 
@@ -678,7 +669,7 @@ export default function TripsPage() {
           <Form.Item name="name" label="Название шаблона" rules={[{ required: true, message: 'Введите название' }]}>
             <Input placeholder="Напр. Колпино → Москва, реф" />
           </Form.Item>
-          <Text type="secondary">Если название совпадает с существующим шаблоном — он будет обновлён. Текущие значения формы (включая грузы) сохранятся в шаблон.</Text>
+          <Text type="secondary">Если название совпадает с существующим — он будет обновлён. Грузы (строки маршрута) в шаблон не сохраняются.</Text>
         </Form>
       </Modal>
 
@@ -698,12 +689,6 @@ export default function TripsPage() {
             <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="actualWeightKg" label="Факт. вес (кг)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-          <Text type="secondary">
-            {completingTrip?.status === 'PLANNED'
-              ? 'Будут зафиксированы отправление и приёмка, рейс перейдёт в «Завершён».'
-              : 'Будет зафиксирована приёмка, рейс перейдёт в «Завершён».'}
-            {' '}Стоимость распределится по лоткам.
-          </Text>
         </Form>
       </Modal>
     </>
