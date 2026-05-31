@@ -615,6 +615,7 @@ model CustomerRequest {
   productCategory    ProductCategory?
   tempRegime         TempRegime?
   status             RequestStatus    @default(NEW)
+  perTripScope       PerTripScope     @default(CARGO)
   notes              String?
   clientUpd          String?
   transportNote      String?
@@ -919,6 +920,15 @@ model RequestCargo {
 enum CargoPricingMode {
   CARGO
   LEG
+  TARIFF
+}
+
+// Как распределяется фикс-тариф PER_TRIP по грузам заявки:
+// CARGO — полная ставка точки на каждый PER_TRIP-груз;
+// REQUEST — одна сумма на заявку (Σ ставок уникальных точек ÷ число PER_TRIP-грузов).
+enum PerTripScope {
+  CARGO
+  REQUEST
 }
 
 // Плечо маршрута груза: один отрезок забор→выгрузка, привязывается к своему рейсу
