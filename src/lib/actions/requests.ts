@@ -130,7 +130,6 @@ export async function createRequest(input: any) {
       ...data,
       requestNumber,
       requestDate: data.requestDate ? new Date(data.requestDate) : new Date(),
-      requestedDate: data.requestedDate ? new Date(data.requestedDate) : null,
       pickupDate: data.pickupDate ? new Date(data.pickupDate) : null,
       deliveryDate: data.deliveryDate ? new Date(data.deliveryDate) : null,
       status: 'NEW',
@@ -152,7 +151,6 @@ export async function updateRequest(id: string, input: any) {
     data: {
       ...data,
       requestDate: data.requestDate ? new Date(data.requestDate) : null,
-      requestedDate: data.requestedDate ? new Date(data.requestedDate) : null,
       pickupDate: data.pickupDate ? new Date(data.pickupDate) : null,
       deliveryDate: data.deliveryDate ? new Date(data.deliveryDate) : null,
       updatedById: actor,

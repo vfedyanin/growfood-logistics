@@ -455,6 +455,14 @@ enum Severity {
 }
 ```
 
+#### Операционные правила (инварианты)
+
+**Точки рейса (`Trip.originId` / `Trip.destinationId`).** Поля nullable: черновик (`DRAFT`) допустимо создавать без точек. При переходе в `PLANNED` и далее обе точки обязательны — инвариант проверяется в `assertRequiredForPlanned` (`src/lib/actions/trips.ts`); прямой записи nullable-значений в `PLANNED+` быть не должно.
+
+**Тип ТС.** Авторитетный источник — тип назначенного транспортного средства (`Trip.vehicle.vehicleType`, факт). Плановый `Trip.vehicleTypeCode` — лишь подсказка на стадии черновика, пока ТС не назначено. В UI используется хелпер `effectiveVehicleType(trip)` = `vehicle.vehicleType.name || vehicleType.name || '—'` (факт приоритетнее плана).
+
+**Даты заявки и плеч.** Операционная правда — даты плеч: `RequestCargoLeg.plannedPickup` / `plannedDropoff` (+ соответствующие `*From`/`*To` как `HH:mm`). Поля шапки заявки `CustomerRequest.pickupDate` / `deliveryDate` (+ `*TimeFrom`/`*TimeTo`) — это укрупнённые окна шапки, вторичны относительно плеч. `CustomerRequest.requestDate` — дата регистрации заявки. (Поле `requestedDate` удалено как мёртвое — не заполнялось и не имело ввода в форме.)
+
 ### 4. Финансы
 
 ```prisma

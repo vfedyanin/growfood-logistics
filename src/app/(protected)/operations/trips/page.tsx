@@ -64,6 +64,8 @@ const opTypeOptions = [{ value: 'LOADING', label: 'Загрузка' }, { value:
 
 const dt = (d: any) => (d ? dayjs(d).format('DD.MM.YYYY HH:mm') : '—');
 const money = (v: any) => (v != null ? Number(v).toLocaleString('ru') + ' ₽' : '—');
+// Авторитетный тип ТС: по назначенному ТС (факт), иначе плановый vehicleTypeCode (черновик).
+const effectiveVehicleType = (t: any) => t?.vehicle?.vehicleType?.name || t?.vehicleType?.name || '—';
 
 // Drag-and-drop сортируемая строка маршрута
 function SortableRouteRow({ id, children }: { id: string; children: (listeners: any) => React.ReactNode }) {
@@ -568,7 +570,7 @@ export default function TripsPage() {
               <Descriptions.Item label="Перевозчик">{viewTrip.carrier?.name || '—'}</Descriptions.Item>
               <Descriptions.Item label="ТС">{viewTrip.vehicle?.plateNumber || '—'}</Descriptions.Item>
               <Descriptions.Item label="Водитель">{viewTrip.driver?.fullName || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Тип ТС">{viewTrip.vehicleType?.name || viewTrip.vehicle?.vehicleType?.name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Тип ТС">{effectiveVehicleType(viewTrip)}</Descriptions.Item>
               <Descriptions.Item label="Факт. стоимость">{money(viewTrip.actualCost)}</Descriptions.Item>
               <Descriptions.Item label="Откуда → Куда" span={2}>{(viewTrip.origin?.name || '—') + ' → ' + (viewTrip.destination?.name || '—')}</Descriptions.Item>
               <Descriptions.Item label="Выезд план / факт">{dt(viewTrip.plannedDeparture)} / {dt(viewTrip.actualDeparture)}</Descriptions.Item>
