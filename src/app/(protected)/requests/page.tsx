@@ -468,9 +468,9 @@ export default function RequestsPage() {
         <Space wrap size="large">
           <Form.Item name="customerId" label="Заявитель" rules={[{ required: true }]}><CustomerSelect style={{ width: 240 }} /></Form.Item>
           <Form.Item name="payerId" label="Плательщик"><CustomerSelect style={{ width: 240 }} /></Form.Item>
-          <Form.Item name="verticalCode" label="Вертикаль (из заявителя)" tooltip="Подтягивается автоматически по заявителю"><VerticalSelect style={{ width: 200 }} disabled /></Form.Item>
         </Space>
         <Space wrap size="large">
+          <Form.Item name="verticalCode" label="Вертикаль (из заявителя)" tooltip="Подтягивается автоматически по заявителю"><VerticalSelect style={{ width: 240 }} disabled /></Form.Item>
           <Form.Item name="shipperId" label="Грузоотправитель"><CustomerSelect partyRole="SHIPPER" style={{ width: 240 }} /></Form.Item>
         </Space>
         <Space wrap size="large">
@@ -478,14 +478,15 @@ export default function RequestsPage() {
           <Form.Item name="deliveryLocationId" label="Куда (общее)"><LocationSelect style={{ width: 240 }} allowClear /></Form.Item>
         </Space>
         <Space wrap size="large">
-          <Form.Item name="requestDate" label="Дата заявки"><DatePicker format="DD.MM.YYYY" /></Form.Item>
+          <Form.Item name="requestDate" label="Дата заявки"><DatePicker format="DD.MM.YYYY" style={{ width: 240 }} /></Form.Item>
+          <Form.Item name="requestedPallets" label="Кол-во паллет"><InputNumber min={0} style={{ width: 240 }} /></Form.Item>
         </Space>
         <Form.Item name="notes" label="Примечания"><Input.TextArea rows={2} /></Form.Item>
 
         <Divider titlePlacement="left">Сопроводительные документы</Divider>
         <Space wrap size="large">
-          <Form.Item name="clientUpd" label="УПД Клиента"><Input style={{ width: 220 }} placeholder="Номер УПД" /></Form.Item>
-          <Form.Item name="transportNote" label="ТрН"><Input style={{ width: 220 }} placeholder="Номер транспортной накладной" /></Form.Item>
+          <Form.Item name="clientUpd" label="УПД Клиента"><Input style={{ width: 240 }} placeholder="Номер УПД" /></Form.Item>
+          <Form.Item name="transportNote" label="ТрН"><Input style={{ width: 240 }} placeholder="Номер транспортной накладной" /></Form.Item>
         </Space>
 
         {!editing && (
@@ -536,6 +537,7 @@ export default function RequestsPage() {
                 {viewReq.deliveryDate ? fmt(viewReq.deliveryDate) : '—'}
                 {(viewReq.deliveryTimeFrom || viewReq.deliveryTimeTo) ? ` · ${viewReq.deliveryTimeFrom || '?'}–${viewReq.deliveryTimeTo || '?'}` : ''}
               </Descriptions.Item>
+              <Descriptions.Item label="Кол-во паллет">{viewReq.requestedPallets ?? '—'}</Descriptions.Item>
               <Descriptions.Item label="Сумма (итого по грузам)">{rub(reqSum(viewReq))}</Descriptions.Item>
               <Descriptions.Item label="Счета">{viewReq.invoices?.length ? viewReq.invoices.map((i: any) => `${i.invoiceNumber} (${rub(i.amount)})`).join(', ') : '—'}</Descriptions.Item>
             </Descriptions>
