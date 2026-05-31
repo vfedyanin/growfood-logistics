@@ -21,6 +21,7 @@ import {
 import {
   getRequestTemplates, getRequestTemplate, createRequestTemplate, updateRequestTemplate, deleteRequestTemplate,
 } from '@/lib/actions/templates';
+import { getCustomerDeliveryLocations } from '@/lib/actions/references';
 
 const { Text } = Typography;
 
@@ -40,10 +41,38 @@ const productCatOptions = [
 ];
 const tempRegimeOptions = [{ value: 'FROZEN', label: 'Заморозка' }, { value: 'COOLED', label: 'Охлаждение' }, { value: 'AMBIENT', label: 'Без режима' }];
 const unitTypeOptions = [{ value: 'PALLET', label: 'Паллета' }, { value: 'BOX', label: 'Короб' }, { value: 'CARTON', label: 'Коробка' }];
-const pricingModeOptions = [{ value: 'CARGO', label: 'Цена на груз' }, { value: 'LEG', label: 'Цена по плечам' }];
+const pricingModeOptions = [
+  { value: 'CARGO', label: 'Цена на груз' },
+  { value: 'LEG', label: 'Цена по плечам' },
+  { value: 'TARIFF', label: 'По тарифу точки' },
+];
+const perTripScopeOptions = [
+  { value: 'CARGO', label: 'на каждый груз' },
+  { value: 'REQUEST', label: 'одна на заявку' },
+];
+const pricingLabel = (m: string) => (m === 'LEG' ? 'цена по плечам' : m === 'TARIFF' ? 'по тарифу точки' : 'цена на груз');
 const fmt = (d: any) => (d ? dayjs(d).format('DD.MM.YYYY') : '—');
 const fmtt = (d: any) => (d ? dayjs(d).format('DD.MM HH:mm') : '—');
 const rub = (v: any) => (v != null ? Number(v).toLocaleString('ru') + ' ₽' : '—');
+
+// Предпросчёт тарифной выручки за доставку груза в точку (авторитетный расчёт — на сервере).
+function TariffPreview({ tariff, pallets, discount, scope }: { tariff?: { method: string | null; amount: number }; pallets: any; discount: any; scope: string }) {
+  const { Text: T } = Typography;
+  if (!tariff || !tariff.method)
+    return <T type="warning">Тариф для выбранной точки не задан — добавьте его в карточке контрагента (точки доставки).</T>;
+  const amount = Number(tariff.amount) || 0;
+  const base = tariff.method === 'PER_PALLET' ? amount * (Number(pallets) || 0) : amount;
+  const final = Math.max(0, base - (Number(discount) || 0));
+  const methodLabel = tariff.method === 'PER_PALLET' ? 'за паллету' : 'за рейс';
+  return (
+    <T type="secondary">
+      Тариф: {amount.toLocaleString('ru')} ₽ {methodLabel}
+      {tariff.method === 'PER_PALLET' ? ` × ${Number(pallets) || 0} пал` : ''} = база {base.toLocaleString('ru')} ₽
+      {discount ? ` − ${Number(discount).toLocaleString('ru')} ₽ скидка` : ''} → итого {final.toLocaleString('ru')} ₽
+      {tariff.method === 'PER_TRIP' && scope === 'REQUEST' ? ' · фикс делится между PER_TRIP-грузами заявки при сохранении' : ''}
+    </T>
+  );
+}
 
 // Поля одного плеча (используются в Form.List создания и в модалке груза)
 function LegFields({ name, restField, showPrice }: { name: number; restField: any; showPrice: boolean }) {
@@ -64,8 +93,11 @@ function LegFields({ name, restField, showPrice }: { name: number; restField: an
 }
 
 // Карточка одного груза в форме создания (вложенный список плеч)
-function CargoCard({ name, restField, onRemove, form }: { name: number; restField: any; onRemove: () => void; form: any }) {
+function CargoCard({ name, restField, onRemove, form, tariffMap, scope }: { name: number; restField: any; onRemove: () => void; form: any; tariffMap: Record<string, { method: string | null; amount: number }>; scope: string }) {
   const mode = Form.useWatch(['cargoes', name, 'pricingMode'], form) || 'CARGO';
+  const locId = Form.useWatch(['cargoes', name, 'consigneeLocationId'], form);
+  const pallets = Form.useWatch(['cargoes', name, 'pallets'], form);
+  const discount = Form.useWatch(['cargoes', name, 'discount'], form);
   return (
     <Card size="small" style={{ marginBottom: 8 }} title={`Груз №${name + 1}`}
       extra={<Button type="text" danger icon={<MinusCircleOutlined />} onClick={onRemove} />}>
@@ -82,6 +114,12 @@ function CargoCard({ name, restField, onRemove, form }: { name: number; restFiel
         <Space>
           <Form.Item {...restField} name={[name, 'cost']} label="Стоимость, ₽"><InputNumber min={0} style={{ width: 130 }} /></Form.Item>
           <Form.Item {...restField} name={[name, 'discount']} label="Скидка, ₽"><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
+        </Space>
+      )}
+      {mode === 'TARIFF' && (
+        <Space direction="vertical" size={4} style={{ marginBottom: 8 }}>
+          <Form.Item {...restField} name={[name, 'discount']} label="Скидка, ₽" style={{ marginBottom: 4 }}><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
+          <TariffPreview tariff={tariffMap[locId]} pallets={pallets} discount={discount} scope={scope} />
         </Space>
       )}
       <Divider titlePlacement="left" style={{ margin: '8px 0' }}>Плечи маршрута</Divider>
@@ -131,17 +169,32 @@ export default function RequestsPage() {
   const [cargoOpen, setCargoOpen] = useState(false);
   const [editingCargo, setEditingCargo] = useState<any>(null);
   const cargoMode = Form.useWatch('pricingMode', cargoForm) || 'CARGO';
+  const cargoLocId = Form.useWatch('consigneeLocationId', cargoForm);
+  const cargoPallets = Form.useWatch('pallets', cargoForm);
+  const cargoDiscount = Form.useWatch('discount', cargoForm);
 
   // плечо в рейс
   const [assignForm] = Form.useForm();
   const [assignOpen, setAssignOpen] = useState(false);
   const [assigningLeg, setAssigningLeg] = useState<any>(null);
 
+  // тарифы точек доставки текущего контрагента (для предпросчёта TARIFF-грузов)
+  const [tariffMap, setTariffMap] = useState<Record<string, { method: string | null; amount: number }>>({});
+  const perTripScope = Form.useWatch('perTripScope', form) || 'CARGO';
+  const loadTariffs = async (custId?: string) => {
+    if (!custId) { setTariffMap({}); return; }
+    const locs = await getCustomerDeliveryLocations(custId);
+    const map: Record<string, { method: string | null; amount: number }> = {};
+    for (const l of locs as any[]) map[l.locationId] = { method: l.tariffMethod ?? null, amount: l.tariffAmount != null ? Number(l.tariffAmount) : 0 };
+    setTariffMap(map);
+  };
+
   // автоподстановка вертикали из заявителя (в форме создания/редактирования)
   const customerId = Form.useWatch('customerId', form);
   useEffect(() => {
     if (!open || !customerId) return;
     getCustomerVerticalCode(customerId).then((vc) => { if (vc) form.setFieldsValue({ verticalCode: vc }); });
+    loadTariffs(customerId);
     // eslint-disable-next-line
   }, [customerId, open]);
 
@@ -251,7 +304,7 @@ export default function RequestsPage() {
     } catch (e: any) { message.error(e?.message || 'Ошибка сохранения'); }
   };
 
-  const openView = async (r: any) => { setViewReq(await getRequest(r.id)); setViewOpen(true); };
+  const openView = async (r: any) => { const req = await getRequest(r.id); setViewReq(req); loadTariffs(req?.customerId); setViewOpen(true); };
 
   // ---- груз в карточке (с плечами) ----
   const openAddCargo = () => { setEditingCargo(null); cargoForm.resetFields(); cargoForm.setFieldsValue({ unitType: 'PALLET', pricingMode: 'CARGO', legs: [{}] }); setCargoOpen(true); };
@@ -425,7 +478,7 @@ export default function RequestsPage() {
       {(req.cargoes || []).length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет грузов" />}
       {(req.cargoes || []).map((c: any) => (
         <Card key={c.id} size="small" style={{ marginBottom: 8 }}
-          title={`${c.consigneeLocation?.name || c.consignee?.name || 'Груз'} · ${c.pallets ?? '—'}пал/${c.traysCount ?? '—'}лот · итого ${rub(c.finalCost)} · ${c.pricingMode === 'LEG' ? 'цена по плечам' : 'цена на груз'}`}
+          title={`${c.consigneeLocation?.name || c.consignee?.name || 'Груз'} · ${c.pallets ?? '—'}пал/${c.traysCount ?? '—'}лот · итого ${rub(c.finalCost)} · ${pricingLabel(c.pricingMode)}`}
           extra={canWrite && (
             <Space>
               <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditCargo(c)} />
@@ -478,6 +531,10 @@ export default function RequestsPage() {
           <Form.Item name="requestDate" label="Дата заявки"><DatePicker format="DD.MM.YYYY" style={{ width: 240 }} /></Form.Item>
           <Form.Item name="requestedPallets" label="Кол-во паллет"><InputNumber min={0} style={{ width: 240 }} /></Form.Item>
         </Space>
+        <Form.Item name="perTripScope" label="Тариф «за рейс» (PER_TRIP)" initialValue="CARGO"
+          tooltip="Как считать фикс-тариф точки для грузов с ценообразованием «По тарифу точки»: на каждый груз отдельно или одной суммой на всю заявку (делится поровну).">
+          <Segmented options={perTripScopeOptions} />
+        </Form.Item>
         <Form.Item name="notes" label="Примечания"><Input.TextArea rows={2} /></Form.Item>
 
         <Divider titlePlacement="left">Сопроводительные документы</Divider>
@@ -493,7 +550,7 @@ export default function RequestsPage() {
               {(fields, { add, remove }) => (
                 <>
                   {fields.map(({ key, name, ...rest }) => (
-                    <CargoCard key={key} name={name} restField={rest} onRemove={() => remove(name)} form={form} />
+                    <CargoCard key={key} name={name} restField={rest} onRemove={() => remove(name)} form={form} tariffMap={tariffMap} scope={perTripScope} />
                   ))}
                   <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add({ unitType: 'PALLET', pricingMode: 'CARGO', legs: [{}] })}>Добавить груз</Button>
                 </>
@@ -535,6 +592,7 @@ export default function RequestsPage() {
                 {(viewReq.deliveryTimeFrom || viewReq.deliveryTimeTo) ? ` · ${viewReq.deliveryTimeFrom || '?'}–${viewReq.deliveryTimeTo || '?'}` : ''}
               </Descriptions.Item>
               <Descriptions.Item label="Кол-во паллет">{viewReq.requestedPallets ?? '—'}</Descriptions.Item>
+              <Descriptions.Item label="Тариф «за рейс»">{viewReq.perTripScope === 'REQUEST' ? 'одна сумма на заявку' : 'на каждый груз'}</Descriptions.Item>
               <Descriptions.Item label="Сумма (итого по грузам)">{rub(reqSum(viewReq))}</Descriptions.Item>
               <Descriptions.Item label="Счета">{viewReq.invoices?.length ? viewReq.invoices.map((i: any) => `${i.invoiceNumber} (${rub(i.amount)})`).join(', ') : '—'}</Descriptions.Item>
             </Descriptions>
@@ -560,6 +618,12 @@ export default function RequestsPage() {
             <Space>
               <Form.Item name="cost" label="Стоимость, ₽"><InputNumber min={0} style={{ width: 130 }} /></Form.Item>
               <Form.Item name="discount" label="Скидка, ₽"><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
+            </Space>
+          )}
+          {cargoMode === 'TARIFF' && (
+            <Space direction="vertical" size={4} style={{ marginBottom: 8 }}>
+              <Form.Item name="discount" label="Скидка, ₽" style={{ marginBottom: 4 }}><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
+              <TariffPreview tariff={tariffMap[cargoLocId]} pallets={cargoPallets} discount={cargoDiscount} scope={perTripScope} />
             </Space>
           )}
           <Divider titlePlacement="left" style={{ margin: '8px 0' }}>Плечи маршрута</Divider>

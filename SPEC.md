@@ -463,6 +463,23 @@ enum Severity {
 
 **Даты заявки и плеч.** Операционная правда — даты плеч: `RequestCargoLeg.plannedPickup` / `plannedDropoff` (+ соответствующие `*From`/`*To` как `HH:mm`). Поля шапки заявки `CustomerRequest.pickupDate` / `deliveryDate` (+ `*TimeFrom`/`*TimeTo`) — это укрупнённые окна шапки, вторичны относительно плеч. `CustomerRequest.requestDate` — дата регистрации заявки. (Поле `requestedDate` удалено как мёртвое — не заполнялось и не имело ввода в форме.)
 
+#### Клиентский тариф за доставку (выручка)
+
+`CustomerDeliveryLocation.tariffMethod` (`PER_PALLET` | `PER_TRIP`) и `tariffAmount` — это **выручка** (сколько берём с клиента за доставку в конкретную точку), а не себестоимость. Тариф задаётся в карточке контрагента по паре `(customerId, locationId)`.
+
+Груз (`RequestCargo`) получает третий режим ценообразования `pricingMode = TARIFF` (наряду с `CARGO` — ручная цена, и `LEG` — сумма по плечам). Для `TARIFF`:
+
+- Тариф ищется по `(request.customerId, cargo.consigneeLocationId)`.
+- **База**: `PER_PALLET` → `tariffAmount × cargo.pallets`; `PER_TRIP` → `tariffAmount` (с учётом scope, см. ниже).
+- **Скидка**: оператор может ввести `cargo.discount` — она вычитается из тарифной базы. `cargo.cost` в режиме `TARIFF` не используется.
+- `finalCost = max(0, база − discount)`.
+
+`CustomerRequest.perTripScope` (`CARGO` | `REQUEST`, по умолчанию `CARGO`) управляет фикс-тарифом `PER_TRIP`:
+- `CARGO` — полная ставка точки начисляется на каждый PER_TRIP-груз.
+- `REQUEST` — одна сумма на заявку, поделённая поровну между PER_TRIP-грузами: `Σ(tariffAmount по уникальным точкам PER_TRIP-грузов) ÷ (число PER_TRIP-грузов)`. *(Допущение для многоточечного случая: складываем ставки уникальных точек; в типовом «одна точка» это ровно `tariffAmount ÷ N`.)*
+
+`finalCost` всех грузов заявки пересчитывается на сервере (`recomputeRequestFinals`) при любом изменении груза или заявки и является **снимком**: при последующем изменении тарифа в справочнике уже сохранённые `finalCost` автоматически не меняются — нужен повторный пересчёт через редактирование. Выручка течёт в счёт (`createInvoiceFromRequest` суммирует `cargo.finalCost`) и в аналитику.
+
 ### 4. Финансы
 
 ```prisma

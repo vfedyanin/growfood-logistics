@@ -37,6 +37,8 @@ function legCreateData(l: any, order: number, actor: string | null) {
   };
 }
 function cargoFinal(c: any): number | null {
+  // TARIFF считается с контекстом всей заявки (тарифы точек + perTripScope) в recomputeRequestFinals.
+  if (c.pricingMode === 'TARIFF') return null;
   if (c.pricingMode === 'LEG') return (c.legs || []).reduce((s: number, l: any) => s + num(legFinal(l)), 0);
   return c.cost != null || c.discount != null ? num(c.cost) - num(c.discount) : null;
 }
@@ -53,7 +55,8 @@ function cargoScalar(c: any, actor: string | null) {
     tempRegime: c.tempRegime || null,
     pricingMode: mode,
     cost: mode === 'CARGO' ? (c.cost ?? null) : null,
-    discount: mode === 'CARGO' ? (c.discount ?? null) : null,
+    // discount применим к ручной цене (CARGO) и к тарифной базе (TARIFF); в LEG скидка живёт на плечах
+    discount: mode === 'CARGO' || mode === 'TARIFF' ? (c.discount ?? null) : null,
     finalCost: cargoFinal(c),
     notes: c.notes || null,
     createdById: actor,
@@ -66,13 +69,49 @@ function cargoCreateData(c: any, actor: string | null) {
     legs: { create: (c.legs || []).map((l: any, i: number) => legCreateData(l, i + 1, actor)) },
   };
 }
-async function recomputeCargoFinal(cargoId: string) {
-  const c = await prisma.requestCargo.findUnique({ where: { id: cargoId }, include: { legs: true } });
-  if (!c) return;
-  const final = c.pricingMode === 'LEG'
-    ? c.legs.reduce((s, l) => s + num(l.finalCost), 0)
-    : (c.cost != null || c.discount != null ? num(c.cost) - num(c.discount) : null);
-  await prisma.requestCargo.update({ where: { id: cargoId }, data: { finalCost: final } });
+// Карта тарифов контрагента по точкам доставки: locationId → { method, amount }
+async function getCustomerTariffMap(customerId: string) {
+  const locs = await prisma.customerDeliveryLocation.findMany({ where: { customerId } });
+  const map = new Map<string, { method: string | null; amount: number }>();
+  for (const l of locs) map.set(l.locationId, { method: l.tariffMethod, amount: num(l.tariffAmount) });
+  return map;
+}
+
+// Пересчёт finalCost всех грузов заявки. TARIFF-грузы считаются с контекстом заявки:
+// PER_PALLET = ставка×паллеты; PER_TRIP = ставка (scope=CARGO) либо доля от общей суммы
+// (scope=REQUEST: Σ ставок уникальных точек ÷ число PER_TRIP-грузов). discount вычитается из базы.
+async function recomputeRequestFinals(requestId: string) {
+  const req = await prisma.customerRequest.findUnique({
+    where: { id: requestId },
+    include: { cargoes: { include: { legs: true } } },
+  });
+  if (!req) return;
+  const tariffs = await getCustomerTariffMap(req.customerId);
+  const tariffOf = (c: any) => (c.consigneeLocationId ? tariffs.get(c.consigneeLocationId) : undefined);
+  const perTripCargoes = req.cargoes.filter(
+    (c) => c.pricingMode === 'TARIFF' && tariffOf(c)?.method === 'PER_TRIP'
+  );
+  let perTripShare = 0;
+  if (req.perTripScope === 'REQUEST' && perTripCargoes.length) {
+    const uniqLocs = Array.from(new Set(perTripCargoes.map((c) => c.consigneeLocationId as string)));
+    const total = uniqLocs.reduce((s, locId) => s + num(tariffs.get(locId)?.amount), 0);
+    perTripShare = total / perTripCargoes.length;
+  }
+  for (const c of req.cargoes) {
+    let final: number | null;
+    if (c.pricingMode === 'TARIFF') {
+      const t = tariffOf(c);
+      let base = 0;
+      if (t?.method === 'PER_PALLET') base = num(t.amount) * num(c.pallets);
+      else if (t?.method === 'PER_TRIP') base = req.perTripScope === 'REQUEST' ? perTripShare : num(t.amount);
+      final = Math.max(0, base - num(c.discount));
+    } else if (c.pricingMode === 'LEG') {
+      final = c.legs.reduce((s, l) => s + num(l.finalCost), 0);
+    } else {
+      final = c.cost != null || c.discount != null ? num(c.cost) - num(c.discount) : null;
+    }
+    await prisma.requestCargo.update({ where: { id: c.id }, data: { finalCost: final } });
+  }
 }
 
 // ============ List / Get ============
@@ -138,6 +177,7 @@ export async function createRequest(input: any) {
       cargoes: cargoes.length ? { create: cargoes.map((c: any) => cargoCreateData(c, actor)) } : undefined,
     },
   });
+  if (cargoes.length) await recomputeRequestFinals(r.id);
   revalidatePath('/requests');
   return r;
 }
@@ -156,6 +196,8 @@ export async function updateRequest(id: string, input: any) {
       updatedById: actor,
     },
   });
+  // perTripScope может измениться — пересчитываем тарифные грузы заявки
+  await recomputeRequestFinals(id);
   revalidatePath('/requests');
 }
 
@@ -170,8 +212,8 @@ export async function deleteRequest(id: string) {
 export async function addRequestCargo(requestId: string, data: any) {
   await requireRole(W);
   const actor = await getActorId();
-  const c = await prisma.requestCargo.create({ data: { ...cargoCreateData(data, actor), requestId } });
-  await recomputeCargoFinal(c.id);
+  await prisma.requestCargo.create({ data: { ...cargoCreateData(data, actor), requestId } });
+  await recomputeRequestFinals(requestId);
   revalidatePath('/requests');
 }
 export async function updateRequestCargo(id: string, data: any) {
@@ -180,7 +222,7 @@ export async function updateRequestCargo(id: string, data: any) {
   const { legs = [], ...rest } = data;
   const sc = cargoScalar(rest, actor);
   delete (sc as any).createdById;
-  await prisma.requestCargo.update({ where: { id }, data: sc });
+  const updated = await prisma.requestCargo.update({ where: { id }, data: sc, select: { requestId: true } });
   // Плечи: пересоздаём только непривязанные к рейсу; привязанные сохраняем
   await prisma.requestCargoLeg.deleteMany({ where: { requestCargoId: id, tripCargoUnitId: null } });
   if (legs.length) {
@@ -188,7 +230,7 @@ export async function updateRequestCargo(id: string, data: any) {
     let order = (existingMax._max.legOrder || 0);
     for (const l of legs) { order += 1; await prisma.requestCargoLeg.create({ data: { ...legCreateData(l, order, actor), requestCargoId: id } }); }
   }
-  await recomputeCargoFinal(id);
+  await recomputeRequestFinals(updated.requestId);
   revalidatePath('/requests');
   revalidatePath('/operations/cargo');
 }
