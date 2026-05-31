@@ -172,7 +172,6 @@ export default function RequestsPage() {
     form.setFieldsValue({
       ...r,
       requestDate: r.requestDate ? dayjs(r.requestDate) : null,
-      requestedDate: r.requestedDate ? dayjs(r.requestedDate) : null,
       pickupDate: r.pickupDate ? dayjs(r.pickupDate) : null,
       pickupTimeFrom: r.pickupTimeFrom ? dayjs(r.pickupTimeFrom, 'HH:mm') : null,
       pickupTimeTo: r.pickupTimeTo ? dayjs(r.pickupTimeTo, 'HH:mm') : null,
@@ -238,7 +237,6 @@ export default function RequestsPage() {
     const payload = {
       ...v,
       requestDate: v.requestDate ? v.requestDate.toISOString() : null,
-      requestedDate: v.requestedDate ? v.requestedDate.toISOString() : null,
       pickupDate: v.pickupDate ? v.pickupDate.toISOString() : null,
       pickupTimeFrom: toTimeStr(v.pickupTimeFrom),
       pickupTimeTo: toTimeStr(v.pickupTimeTo),
@@ -325,7 +323,6 @@ export default function RequestsPage() {
     form.setFieldsValue({
       ...d,
       requestDate: d.requestDate ? dayjs(d.requestDate) : dayjs(),
-      requestedDate: d.requestedDate ? dayjs(d.requestedDate) : null,
       cargoes: (d.cargoes || []).map((c: any) => ({
         ...c,
         legs: (c.legs || []).map((l: any) => {
@@ -354,7 +351,7 @@ export default function RequestsPage() {
     const cargoes = Array.isArray(v.cargoes) && v.cargoes.length
       ? serializeCargoes(v.cargoes)
       : (editing?.cargoes || []).map(dbCargoToTpl);
-    const data = { ...v, requestDate: v.requestDate ? v.requestDate.toISOString() : null, requestedDate: v.requestedDate ? v.requestedDate.toISOString() : null, cargoes };
+    const data = { ...v, requestDate: v.requestDate ? v.requestDate.toISOString() : null, cargoes };
     try {
       const existing = templates.find((t) => t.name === name);
       if (existing) { await updateRequestTemplate(existing.id, { name, data }); setSelTemplate(existing.id); }

@@ -603,7 +603,6 @@ model CustomerRequest {
   pickupLocationId   String?
   deliveryLocationId String?
   requestDate        DateTime?
-  requestedDate      DateTime?
   pickupDate         DateTime?
   pickupTimeFrom     String?
   pickupTimeTo       String?
