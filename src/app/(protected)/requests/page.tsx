@@ -474,6 +474,10 @@ export default function RequestsPage() {
           <Form.Item name="shipperId" label="Грузоотправитель"><CustomerSelect partyRole="SHIPPER" style={{ width: 240 }} /></Form.Item>
         </Space>
         <Space wrap size="large">
+          <Form.Item name="pickupLocationId" label="Откуда (общее)"><LocationSelect style={{ width: 240 }} allowClear /></Form.Item>
+          <Form.Item name="deliveryLocationId" label="Куда (общее)"><LocationSelect style={{ width: 240 }} allowClear /></Form.Item>
+        </Space>
+        <Space wrap size="large">
           <Form.Item name="requestDate" label="Дата заявки"><DatePicker format="DD.MM.YYYY" /></Form.Item>
         </Space>
         <Form.Item name="notes" label="Примечания"><Input.TextArea rows={2} /></Form.Item>
@@ -522,7 +526,8 @@ export default function RequestsPage() {
               <Descriptions.Item label="Вертикаль">{viewReq.vertical?.name || '—'}</Descriptions.Item>
               <Descriptions.Item label="Дата заявки">{fmt(viewReq.requestDate)}</Descriptions.Item>
               <Descriptions.Item label="Отправитель">{viewReq.shipper?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Конечная точка выгрузки">{viewReq.deliveryLocation?.name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Откуда (общее)">{viewReq.pickupLocation?.name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Куда (общее)">{viewReq.deliveryLocation?.name || '—'}</Descriptions.Item>
               <Descriptions.Item label="Дата забора">
                 {viewReq.pickupDate ? fmt(viewReq.pickupDate) : '—'}
                 {(viewReq.pickupTimeFrom || viewReq.pickupTimeTo) ? ` · ${viewReq.pickupTimeFrom || '?'}–${viewReq.pickupTimeTo || '?'}` : ''}
