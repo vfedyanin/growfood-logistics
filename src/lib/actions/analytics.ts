@@ -18,37 +18,86 @@ const num = (v: any) => (v != null ? Number(v) : 0);
 
 export async function getDashboardMetrics(filters: DashboardFilters = {}) {
   const user = await requireAuth();
-  const where: any = { status: 'COMPLETED', ...tripTypeScopeFor(user) };
+  // Учитываем все рейсы, кроме отменённых (план + факт), а не только COMPLETED:
+  // метрики считаются по принципу «факт, иначе план».
+  const where: any = { status: { not: 'CANCELLED' }, ...tripTypeScopeFor(user) };
   if (filters.tripType) where.tripType = filters.tripType;
   if (filters.verticalCode) where.verticalCode = filters.verticalCode;
   if (filters.shipperId) where.shipperId = filters.shipperId;
   if (filters.consigneeId) where.consigneeId = filters.consigneeId;
   if (filters.payerId) where.payerId = filters.payerId;
   if (filters.carrierId) where.carrierId = filters.carrierId;
-  if (filters.dateFrom || filters.dateTo) {
-    where.actualArrival = {};
-    if (filters.dateFrom) where.actualArrival.gte = new Date(filters.dateFrom);
-    if (filters.dateTo) where.actualArrival.lte = new Date(filters.dateTo);
-  }
 
-  const [trips, marketPrices] = await Promise.all([
+  const [tripsRaw, marketPrices, tariffs] = await Promise.all([
     prisma.trip.findMany({
       where,
       include: {
         route: true, carrier: true, vertical: true,
+        vehicleType: true,
         vehicle: { include: { vehicleType: true } },
         origin: true, destination: true,
         cargoUnits: { include: { vertical: true, customer: true } },
       },
     }),
     prisma.marketPrice.findMany(),
+    prisma.tariff.findMany({ include: { carrierContract: { select: { carrierId: true } } } }),
   ]);
+
+  // ===== Хелперы «факт, иначе план» =====
+  const effVtCode = (t: any): string | null => t.vehicle?.vehicleTypeCode ?? t.vehicleTypeCode ?? null;
+  const effVt = (t: any): any => t.vehicle?.vehicleType ?? t.vehicleType ?? null;
+  const palletsOf = (t: any): number =>
+    t.actualPallets ?? t.plannedPallets ?? t.cargoUnits.reduce((s: number, c: any) => s + (c.pallets || 0), 0);
+  const effDate = (t: any): Date | null => t.actualArrival ?? t.plannedArrival ?? t.plannedDeparture ?? null;
+
+  // Индекс тарифов по перевозчику+типу ТС для быстрого матча в памяти
+  const tIdx = new Map<string, any[]>();
+  for (const tar of tariffs) {
+    const cid = (tar as any).carrierContract?.carrierId;
+    if (!cid) continue;
+    const k = `${cid}|${tar.vehicleTypeCode}`;
+    const arr = tIdx.get(k) || [];
+    arr.push(tar);
+    tIdx.set(k, arr);
+  }
+  const tariffCost = (t: any): number => {
+    const cid = t.carrierId; const vt = effVtCode(t);
+    if (!cid || !vt) return 0;
+    const cands = tIdx.get(`${cid}|${vt}`);
+    if (!cands || !cands.length) return 0;
+    const date = effDate(t) || new Date();
+    const valid = cands.filter((x) => x.validFrom <= date && (x.validTo == null || x.validTo >= date));
+    const pool = valid.length ? valid : cands;
+    const pick = (t.routeId && pool.find((x) => x.routeId === t.routeId)) || pool.find((x) => x.routeId == null) || pool[0];
+    if (!pick) return 0;
+    const pallets = palletsOf(t);
+    const km = t.route?.distanceKm ? Number(t.route.distanceKm) : 0;
+    if (pick.pricePerTrip != null) return Number(pick.pricePerTrip);
+    if (pick.pricePerPallet != null) return Number(pick.pricePerPallet) * pallets;
+    if (pick.pricePerKm != null) return Number(pick.pricePerKm) * km;
+    return 0;
+  };
+  const costOf = (t: any): number => (t.actualCost != null ? Number(t.actualCost) : tariffCost(t));
+
+  // Фильтр по датам — по эффективной дате (факт/план), в памяти
+  let trips = tripsRaw;
+  if (filters.dateFrom || filters.dateTo) {
+    const from = filters.dateFrom ? new Date(filters.dateFrom) : null;
+    const to = filters.dateTo ? new Date(filters.dateTo) : null;
+    trips = trips.filter((t) => {
+      const d = effDate(t);
+      if (!d) return false;
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      return true;
+    });
+  }
 
   const tripsCount = trips.length;
 
   // ===== 1. Стоимость =====
-  const totalCost = trips.reduce((s, t) => s + num(t.actualCost), 0);
-  const totalPallets = trips.reduce((s, t) => s + (t.actualPallets || 0), 0);
+  const totalCost = trips.reduce((s, t) => s + costOf(t), 0);
+  const totalPallets = trips.reduce((s, t) => s + palletsOf(t), 0);
   const avgCostPerTrip = tripsCount ? totalCost / tripsCount : 0;
 
   const mpMap = new Map<string, number>();
@@ -60,7 +109,7 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
   }
   let marketTotal = 0, hasMarket = false;
   for (const t of trips) {
-    const vt = t.vehicle?.vehicleTypeCode;
+    const vt = effVtCode(t);
     if (t.routeId && vt) {
       const p = mpMap.get(`${t.routeId}|${vt}`);
       if (p) { marketTotal += p; hasMarket = true; }
@@ -70,26 +119,28 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
 
   const monthMap = new Map<string, { cost: number; pallets: number }>();
   for (const t of trips) {
-    const d = t.actualArrival || t.plannedArrival;
+    const d = effDate(t);
     if (!d) continue;
     const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     const e = monthMap.get(k) || { cost: 0, pallets: 0 };
-    e.cost += num(t.actualCost); e.pallets += t.actualPallets || 0;
+    e.cost += costOf(t); e.pallets += palletsOf(t);
     monthMap.set(k, e);
   }
   const byMonth = Array.from(monthMap.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1))
     .map(([month, v]) => ({ month, cost: Math.round(v.cost), costPerPallet: v.pallets ? Math.round(v.cost / v.pallets) : 0 }));
 
-  // ===== 2. Загрузка ТС =====
+  // ===== 2. Загрузка ТС (ёмкость по эффективному типу ТС) =====
   let sumLoad = 0, loadN = 0, high = 0, mid = 0, low = 0;
   const typeMap = new Map<string, { sum: number; n: number }>();
   for (const t of trips) {
-    const cap = t.vehicle?.vehicleType?.capacityPallets;
-    if (cap && t.actualPallets != null) {
-      const pct = (t.actualPallets / cap) * 100;
+    const vtObj = effVt(t);
+    const cap = vtObj?.capacityPallets;
+    const pal = palletsOf(t);
+    if (cap && pal != null && pal > 0) {
+      const pct = (pal / cap) * 100;
       sumLoad += pct; loadN++;
       if (pct >= 80) high++; else if (pct >= 60) mid++; else low++;
-      const name = t.vehicle!.vehicleType!.name;
+      const name = vtObj.name;
       const e = typeMap.get(name) || { sum: 0, n: 0 };
       e.sum += pct; e.n++; typeMap.set(name, e);
     }
@@ -104,7 +155,7 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
     const label = t.route?.code || `${t.origin?.name || '—'} → ${t.destination?.name || '—'}`;
     const km = num(t.route?.distanceKm);
     const e = routeMap.get(key) || { label, trips: 0, cost: 0, pallets: 0, km };
-    e.trips++; e.cost += num(t.actualCost); e.pallets += t.actualPallets || 0;
+    e.trips++; e.cost += costOf(t); e.pallets += palletsOf(t);
     routeMap.set(key, e);
   }
   const routes = Array.from(routeMap.values()).map((r) => ({
@@ -113,7 +164,7 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
     costPerPalletKm: r.pallets && r.km ? +(r.cost / (r.pallets * r.km)).toFixed(2) : 0,
   })).sort((a, b) => b.cost - a.cost).slice(0, 20);
 
-  // ===== 4. Качество (OTD) =====
+  // ===== 4. Качество (OTD) — только по факту (появится по завершении рейсов) =====
   let withTimes = 0, onTime = 0, lateCount = 0, delaySum = 0, withActual = 0;
   for (const t of trips) {
     if (t.actualArrival) withActual++;
@@ -135,23 +186,24 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
     tempViolations,
   };
 
-  // ===== 5/6. Аллокация по вертикалям / заказчикам (по лоткам, in-memory) =====
+  // ===== 5/6. Аллокация по вертикалям / заказчикам (вес: лотки, иначе паллеты) =====
   const vertMap = new Map<string, number>();
   const custMap = new Map<string, { name: string; cost: number; trays: number }>();
   let totalTrays = 0;
   for (const t of trips) {
-    const cost = num(t.actualCost);
-    const trays = t.cargoUnits.reduce((s, c) => s + (c.traysCount || 0), 0);
-    totalTrays += trays;
-    for (const c of t.cargoUnits) {
-      const share = trays > 0 ? (c.traysCount || 0) / trays : 0;
+    const cost = costOf(t);
+    const weights = t.cargoUnits.map((c: any) => (c.traysCount || c.pallets || 0));
+    const wSum = weights.reduce((s: number, w: number) => s + w, 0);
+    t.cargoUnits.forEach((c: any, i: number) => {
+      totalTrays += (c.traysCount || 0);
+      const share = wSum > 0 ? weights[i] / wSum : 0;
       const alloc = cost * share;
       const vName = c.vertical?.name || c.verticalCode || t.vertical?.name || '—';
       vertMap.set(vName, (vertMap.get(vName) || 0) + alloc);
       const cName = c.customer?.name || '—';
       const e = custMap.get(cName) || { name: cName, cost: 0, trays: 0 };
       e.cost += alloc; e.trays += c.traysCount || 0; custMap.set(cName, e);
-    }
+    });
   }
   const byVertical = Array.from(vertMap.entries()).map(([vertical, cost]) => ({ vertical, cost: Math.round(cost) })).sort((a, b) => b.cost - a.cost);
   const byCustomer = Array.from(custMap.values()).map((c) => ({
@@ -167,7 +219,8 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
   };
 
   // ===== Рентабельность клиентов LaaS по плательщикам =====
-  const requestFilter: any = { verticalCode: 'LAAS' };
+  // Вертикали LaaS: LAAS, LAAS-LTL, LAAS-B2C — матчим по префиксу.
+  const requestFilter: any = { verticalCode: { startsWith: 'LAAS' } };
   if (filters.payerId) requestFilter.payerId = filters.payerId;
   if (filters.dateFrom || filters.dateTo) {
     requestFilter.requestDate = {};
