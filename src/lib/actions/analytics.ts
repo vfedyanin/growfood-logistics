@@ -229,14 +229,39 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
   }
   const laasCargo = await prisma.requestCargo.findMany({
     where: { request: requestFilter },
-    include: { request: { include: { payer: true, customer: true } }, legs: { include: { tripCargoUnit: true } } },
+    include: {
+      request: { include: { payer: true, customer: true } },
+      legs: {
+        include: {
+          tripCargoUnit: {
+            include: {
+              trip: { include: { route: true, vehicle: { include: { vehicleType: true } }, vehicleType: true, cargoUnits: true } },
+            },
+          },
+        },
+      },
+    },
   });
+  // Расход по плечу = доля стоимости рейса (факт allocatedCost, иначе по тарифу),
+  // для рейсов в любом статусе кроме CANCELLED. Доля = вес плеча / Σ весов груза рейса.
+  const legCost = (l: any): number => {
+    const tcu = l.tripCargoUnit;
+    if (!tcu) return 0;
+    if (tcu.allocatedCost != null) return num(tcu.allocatedCost);
+    const trip = tcu.trip;
+    if (!trip || trip.status === 'CANCELLED') return 0;
+    const units = trip.cargoUnits || [];
+    const totalW = units.reduce((s: number, u: any) => s + (u.traysCount || u.pallets || 0), 0);
+    const myW = tcu.traysCount || tcu.pallets || 0;
+    const share = totalW > 0 ? myW / totalW : (units.length ? 1 / units.length : 0);
+    return tariffCost(trip) * share;
+  };
   const payerMap = new Map<string, { payer: string; revenue: number; cost: number }>();
   for (const c of laasCargo) {
     const payer = c.request.payer?.name || c.request.customer?.name || '—';
     const e = payerMap.get(payer) || { payer, revenue: 0, cost: 0 };
     e.revenue += num(c.finalCost);
-    e.cost += c.legs.reduce((s, l) => s + num(l.tripCargoUnit?.allocatedCost), 0);
+    e.cost += c.legs.reduce((s, l) => s + legCost(l), 0);
     payerMap.set(payer, e);
   }
   const laasProfitability = Array.from(payerMap.values())
