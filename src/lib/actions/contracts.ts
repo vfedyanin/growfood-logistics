@@ -139,3 +139,15 @@ export async function getCarrierContractOptions() {
   const rows = await prisma.carrierContract.findMany({ where: { isActive: true }, include: { carrier: true }, orderBy: { validFrom: 'desc' } });
   return rows.map((c) => ({ value: c.id, label: `${c.contractNumber} — ${c.carrier.name}` }));
 }
+
+// Ставка НДС выбранного договора (для формы тарифа): side = CUSTOMER | CARRIER
+export async function getContractVat(side: 'CUSTOMER' | 'CARRIER', contractId: string): Promise<number> {
+  await requireAuth();
+  if (!contractId) return 0;
+  if (side === 'CARRIER') {
+    const c = await prisma.carrierContract.findUnique({ where: { id: contractId }, select: { vatRatePct: true } });
+    return c?.vatRatePct ?? 0;
+  }
+  const c = await prisma.customerContract.findUnique({ where: { id: contractId }, select: { vatRatePct: true } });
+  return c?.vatRatePct ?? 0;
+}

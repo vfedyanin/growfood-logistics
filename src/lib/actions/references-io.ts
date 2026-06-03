@@ -345,7 +345,7 @@ const customerContractCfg: RefConfig = {
   paths: ['/references/customer-contracts'],
   exportRows: async () => {
     const rows = await prisma.customerContract.findMany({ include: { customer: true }, orderBy: { contractNumber: 'asc' } });
-    return rows.map(r => ({ contractNumber: r.contractNumber, customerCode: r.customer.code, contractType: r.contractType, validFrom: dateStr(r.validFrom), validTo: dateStr(r.validTo), paymentTerms: r.paymentTerms, notes: r.notes, isActive: r.isActive }));
+    return rows.map(r => ({ contractNumber: r.contractNumber, customerCode: r.customer.code, contractType: r.contractType, vatRatePct: r.vatRatePct, validFrom: dateStr(r.validFrom), validTo: dateStr(r.validTo), paymentTerms: r.paymentTerms, notes: r.notes, isActive: r.isActive }));
   },
   parseRow: async (r, actor) => {
     const contractNumber = req(r.contractNumber, 'contractNumber');
@@ -355,6 +355,7 @@ const customerContractCfg: RefConfig = {
     const data: any = {
       contractType: inEnum(r.contractType, CONTRACT_TYPES, 'contractType'),
       customerId: c.id,
+      vatRatePct: i(r.vatRatePct) ?? 0,
       validFrom: date(r.validFrom), validTo: date(r.validTo),
       paymentTerms: s(r.paymentTerms), notes: s(r.notes),
       isActive: b(r.isActive), updatedById: actor,
@@ -385,7 +386,7 @@ const carrierContractCfg: RefConfig = {
   paths: ['/references/carrier-contracts'],
   exportRows: async () => {
     const rows = await prisma.carrierContract.findMany({ include: { carrier: true }, orderBy: { contractNumber: 'asc' } });
-    return rows.map(r => ({ contractNumber: r.contractNumber, carrierCode: r.carrier.code, validFrom: dateStr(r.validFrom), validTo: dateStr(r.validTo), paymentTerms: r.paymentTerms, notes: r.notes, isActive: r.isActive }));
+    return rows.map(r => ({ contractNumber: r.contractNumber, carrierCode: r.carrier.code, vatRatePct: r.vatRatePct, validFrom: dateStr(r.validFrom), validTo: dateStr(r.validTo), paymentTerms: r.paymentTerms, notes: r.notes, isActive: r.isActive }));
   },
   parseRow: async (r, actor) => {
     const contractNumber = req(r.contractNumber, 'contractNumber');
@@ -394,6 +395,7 @@ const carrierContractCfg: RefConfig = {
     if (!c) throw new Error(`'carrierCode'='${carrierCode}' не найден в Перевозчиках`);
     const data: any = {
       carrierId: c.id,
+      vatRatePct: i(r.vatRatePct) ?? 0,
       validFrom: date(r.validFrom), validTo: date(r.validTo),
       paymentTerms: s(r.paymentTerms), notes: s(r.notes),
       isActive: b(r.isActive), updatedById: actor,

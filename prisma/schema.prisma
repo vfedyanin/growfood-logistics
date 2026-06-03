@@ -299,6 +299,7 @@ model CustomerContract {
   contractNumber String
   customerId     String
   contractType   ContractType
+  vatRatePct     Int          @default(0) // ставка НДС: 0(без НДС)/5/7/10/22
   validFrom      DateTime
   validTo        DateTime?
   paymentTerms   String?
@@ -324,6 +325,7 @@ model CarrierContract {
   id             String    @id @default(cuid())
   contractNumber String
   carrierId      String
+  vatRatePct     Int       @default(0) // ставка НДС: 0(без НДС)/5/7/10/22
   validFrom      DateTime
   validTo        DateTime?
   paymentTerms   String?

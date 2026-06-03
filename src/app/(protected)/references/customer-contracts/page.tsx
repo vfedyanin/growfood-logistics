@@ -18,6 +18,13 @@ const typeOptions = [
   { value: 'RETAIL_SUPPLY', label: 'Поставка в сеть' },
   { value: 'INTERNAL_AGREEMENT', label: 'Внутреннее соглашение' },
 ];
+const vatOptions = [
+  { value: 0, label: 'Без НДС (0%)' },
+  { value: 5, label: '5%' },
+  { value: 7, label: '7%' },
+  { value: 10, label: '10%' },
+  { value: 22, label: '22%' },
+];
 
 const fmt = (d: any) => (d ? dayjs(d).format('DD.MM.YYYY') : '—');
 
@@ -33,7 +40,7 @@ export default function CustomerContractsPage() {
   const load = async () => { setLoading(true); try { setData(await getCustomerContracts()); } finally { setLoading(false); } };
   useEffect(() => { load(); }, []);
 
-  const onAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ contractType: 'LAAS_SERVICE', isActive: true }); setOpen(true); };
+  const onAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ contractType: 'LAAS_SERVICE', vatRatePct: 0, isActive: true }); setOpen(true); };
   const onEdit = (r: any) => {
     setEditing(r);
     form.setFieldsValue({ ...r, validFrom: r.validFrom ? dayjs(r.validFrom) : null, validTo: r.validTo ? dayjs(r.validTo) : null });
@@ -56,6 +63,7 @@ export default function CustomerContractsPage() {
     { title: '№ договора', dataIndex: 'contractNumber', key: 'contractNumber' },
     { title: 'Клиент', key: 'customer', render: (_: any, r: any) => r.customer?.name || '—' },
     { title: 'Тип', dataIndex: 'contractType', key: 'contractType', render: (t: string) => <Tag>{typeOptions.find((o) => o.value === t)?.label}</Tag> },
+    { title: 'НДС', dataIndex: 'vatRatePct', key: 'vatRatePct', width: 90, render: (v: number) => (v ? `${v}%` : 'без НДС') },
     { title: 'Действует с', dataIndex: 'validFrom', key: 'validFrom', render: fmt, responsive: ['lg'] as any },
     { title: 'по', dataIndex: 'validTo', key: 'validTo', render: fmt, responsive: ['lg'] as any },
     { title: 'Активен', dataIndex: 'isActive', key: 'isActive', render: (v: boolean) => v ? <Tag color="green">Да</Tag> : <Tag>Нет</Tag> },
@@ -82,6 +90,7 @@ export default function CustomerContractsPage() {
         <Form.Item name="contractNumber" label="№ договора" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="customerId" label="Клиент" rules={[{ required: true }]}><CustomerSelect style={{ width: '100%' }} /></Form.Item>
         <Form.Item name="contractType" label="Тип договора" rules={[{ required: true }]}><Select options={typeOptions} /></Form.Item>
+        <Form.Item name="vatRatePct" label="Ставка НДС" rules={[{ required: true }]} tooltip="Применяется к тарифам по этому договору"><Select options={vatOptions} style={{ width: 200 }} /></Form.Item>
         <Space size="large">
           <Form.Item name="validFrom" label="Действует с" rules={[{ required: true }]}><DatePicker format="DD.MM.YYYY" /></Form.Item>
           <Form.Item name="validTo" label="по"><DatePicker format="DD.MM.YYYY" /></Form.Item>
