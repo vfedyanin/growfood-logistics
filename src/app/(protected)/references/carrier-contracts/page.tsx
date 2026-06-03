@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Button, Form, Input, Switch, DatePicker, Space, Popconfirm, Tag, message } from 'antd';
+import { Button, Form, Input, Select, Switch, DatePicker, Space, Popconfirm, Tag, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
@@ -14,6 +14,13 @@ import {
 } from '@/lib/actions/contracts';
 
 const fmt = (d: any) => (d ? dayjs(d).format('DD.MM.YYYY') : '—');
+const vatOptions = [
+  { value: 0, label: 'Без НДС (0%)' },
+  { value: 5, label: '5%' },
+  { value: 7, label: '7%' },
+  { value: 10, label: '10%' },
+  { value: 22, label: '22%' },
+];
 
 export default function CarrierContractsPage() {
   const { can } = usePermissions();
@@ -27,7 +34,7 @@ export default function CarrierContractsPage() {
   const load = async () => { setLoading(true); try { setData(await getCarrierContracts()); } finally { setLoading(false); } };
   useEffect(() => { load(); }, []);
 
-  const onAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ isActive: true }); setOpen(true); };
+  const onAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ vatRatePct: 0, isActive: true }); setOpen(true); };
   const onEdit = (r: any) => {
     setEditing(r);
     form.setFieldsValue({ ...r, validFrom: r.validFrom ? dayjs(r.validFrom) : null, validTo: r.validTo ? dayjs(r.validTo) : null });
@@ -49,6 +56,7 @@ export default function CarrierContractsPage() {
   const columns = [
     { title: '№ договора', dataIndex: 'contractNumber', key: 'contractNumber' },
     { title: 'Перевозчик', key: 'carrier', render: (_: any, r: any) => r.carrier?.name || '—' },
+    { title: 'НДС', dataIndex: 'vatRatePct', key: 'vatRatePct', width: 90, render: (v: number) => (v ? `${v}%` : 'без НДС') },
     { title: 'Действует с', dataIndex: 'validFrom', key: 'validFrom', render: fmt, responsive: ['lg'] as any },
     { title: 'по', dataIndex: 'validTo', key: 'validTo', render: fmt, responsive: ['lg'] as any },
     { title: 'Активен', dataIndex: 'isActive', key: 'isActive', render: (v: boolean) => v ? <Tag color="green">Да</Tag> : <Tag>Нет</Tag> },
@@ -74,6 +82,7 @@ export default function CarrierContractsPage() {
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing}>
         <Form.Item name="contractNumber" label="№ договора" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="carrierId" label="Перевозчик" rules={[{ required: true }]}><CarrierSelect style={{ width: '100%' }} /></Form.Item>
+        <Form.Item name="vatRatePct" label="Ставка НДС" rules={[{ required: true }]} tooltip="Применяется к тарифам по этому договору"><Select options={vatOptions} style={{ width: 200 }} /></Form.Item>
         <Space size="large">
           <Form.Item name="validFrom" label="Действует с" rules={[{ required: true }]}><DatePicker format="DD.MM.YYYY" /></Form.Item>
           <Form.Item name="validTo" label="по"><DatePicker format="DD.MM.YYYY" /></Form.Item>
