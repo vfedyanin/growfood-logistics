@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Аудит данных и сверка расходов LaaS — GrowFood Magistral</title>
+<style>
+  :root { --bd:#e8e8e8; --mut:#888; --ok:#237804; --bad:#cf1322; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#1a1a1a; max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; line-height: 1.5; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 32px 0 10px; border-bottom: 2px solid var(--bd); padding-bottom: 6px; }
+  .meta { color: var(--mut); font-size: 13px; margin-bottom: 8px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--bd); padding: 7px 10px; text-align: left; }
+  th { background: #fafafa; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .hl { background: #f6ffed; }
+  code { background: #f5f5f5; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  ul, ol { margin: 8px 0; }
+  .note { color: var(--mut); font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>Аудит данных и сверка расходов LaaS — GrowFood Magistral</h1>
+  <div class="meta">Источник: прод-БД (production). Период данных: 31.03.2026 – 31.05.2026. Вне области: сравнение с рынком и OTD.</div>
+
+  <h2>1. Объёмы</h2>
+  <table>
+    <tr><th>Сущность</th><th>Кол-во</th><th>Сущность</th><th>Кол-во</th></tr>
+    <tr><td>Заявки</td><td>3 299</td><td>Рейсы</td><td>1 486</td></tr>
+    <tr><td>Груз (RequestCargo)</td><td>3 299</td><td>Груз в рейсах (TripCargoUnit)</td><td>4 603</td></tr>
+    <tr><td>Плечи груза</td><td>5 801</td><td>Маршруты</td><td>38</td></tr>
+    <tr><td>Контрагенты</td><td>24</td><td>Перевозчики</td><td>9</td></tr>
+    <tr><td>Тарифы перевозчиков</td><td>109</td><td>Договоры перевозчиков</td><td>8</td></tr>
+  </table>
+  <p class="note">Рейсы по типу: OWN = 544, CONSOLIDATED = 409, <b>LAAS = 533</b>. По вертикали: GF-RETAIL = 893, LAAS-LTL = 593.</p>
+
+  <h2>2. Сверка расхода LaaS с финслужбой ⭐</h2>
+  <p>Эталон финслужбы (закрытый период, апрель 2026): <b>18 847 482 ₽</b></p>
+  <table>
+    <tr><th>Определение LaaS</th><th>Период</th><th>Система (план по тарифу)</th><th>Финслужба</th><th>Отклонение</th></tr>
+    <tr class="hl"><td><code>tripType = LAAS</code></td><td>апрель 2026</td><td>18 906 100 ₽ (288 рейсов)</td><td>18 847 482 ₽</td><td class="ok">+58 618 ₽ (+0,31 %)</td></tr>
+    <tr><td>verticalCode = LAAS-LTL</td><td>апрель 2026</td><td>20 010 100 ₽ (323)</td><td>18 847 482 ₽</td><td>+1 162 618 ₽ (+5,8 %)</td></tr>
+  </table>
+  <p><b>Вывод:</b> данные финслужбы соответствуют срезу <code>tripType = LAAS</code> за апрель 2026 с отклонением <span class="ok">0,31 %</span>.</p>
+  <ol>
+    <li>В финучёте «LaaS» = рейсы типа LAAS (533 всего, 288 в апреле), а не вертикаль LAAS-LTL. Расход LaaS считать по <code>tripType = LAAS</code>.</li>
+    <li>Тарифная модель себестоимости подтверждена фактом с точностью 0,31 % — ставки и объёмы корректны.</li>
+    <li>Остаток +58 618 ₽: отменённые/скорректированные рейсы, округления, 4 маршрута без distanceKm.</li>
+  </ol>
+  <p class="note">Расчётная себестоимость по тарифу (весь период 03–05): всего 74,79 млн ₽ — LAAS-LTL 34,81 млн ₽, GF-RETAIL 39,98 млн ₽. Σ паллет: 19 852.</p>
+
+  <h2>3. Готовность к анализу</h2>
+  <table>
+    <tr><th>Анализ</th><th>Статус</th></tr>
+    <tr><td>Себестоимость по вертикалям/типам</td><td class="ok">✅ план, покрытие тарифом 98 % (1 455/1 486)</td></tr>
+    <tr><td>Загрузка ТС / маршруты / паллеты</td><td class="ok">✅ план</td></tr>
+    <tr><td>Рентабельность LaaS</td><td class="bad">❌ есть только расход; нет выручки</td></tr>
+  </table>
+
+  <h2>4. Блокеры</h2>
+  <ol>
+    <li><b>Нет фактических данных по рейсам.</b> Все 1 486 рейсов — DRAFT; actualCost/Arrival/Departure/Pallets, vehicleId, driverId — 0. Анализ ведётся на плановом базисе.</li>
+    <li><b>Выручка отсутствует.</b> Клиентских тарифов — 0, договоров клиентов — 0, finalCost — 0/3299. Рентабельность LaaS невозможна без клиентских договоров и тарифов.</li>
+  </ol>
+
+  <h2>5. Замечания по целостности (не блокеры)</h2>
+  <ul>
+    <li>1 211 плеч (21 %) не привязаны к рейсам.</li>
+    <li>31 заявка LAAS-LTL без рейса (из 1 968).</li>
+    <li>4 маршрута без distanceKm: CHEF-MSK, ELEM-MSK, KOL-SPB, KZN-VV.</li>
+    <li>5 грузовых единиц рейсов без requestId.</li>
+    <li>Вертикаль рейса ≠ вертикаль заявки (консолидация) — себестоимость и выручку нельзя сопоставлять 1:1.</li>
+    <li>Структурная целостность чистая: нет дублей кодов, заявок без груза, груза без плеч и т.д.</li>
+  </ul>
+
+  <h2>6. Итог</h2>
+  <p>Структура и справочники в порядке; себестоимость считается на 98 % и подтверждена сверкой с финслужбой (0,31 %). Данные полностью плановые (нет фактов) и без выручки. Критический путь к полной рентабельности LaaS — завести клиентские договоры + тарифы.</p>
+</body>
+</html>
