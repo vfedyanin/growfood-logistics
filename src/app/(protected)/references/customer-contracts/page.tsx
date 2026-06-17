@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Button, Form, Input, Select, Switch, DatePicker, Space, Popconfirm, Tag, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import ImportExportButtons from '@/components/ImportExportButtons';
@@ -68,22 +68,21 @@ export default function CustomerContractsPage() {
     { title: 'по', dataIndex: 'validTo', key: 'validTo', render: fmt, responsive: ['lg'] as any },
     { title: 'Активен', dataIndex: 'isActive', key: 'isActive', render: (v: boolean) => v ? <Tag color="green">Да</Tag> : <Tag>Нет</Tag> },
     {
-      title: 'Действия', key: 'actions', width: 110,
-      render: (_: any, r: any) => w ? (
+      title: 'Действия', key: 'actions', width: 130,
+      render: (_: any, r: any) => (
         <Space>
-          <Button type="link" icon={<EditOutlined />} onClick={() => onEdit(r)} />
-          <Popconfirm title="Удалить?" onConfirm={() => onDelete(r.id)}>
-            <Button type="link" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          <a href={`/references/customer-contracts/${r.id}`} style={{ color: '#1677ff', padding: '4px', display: 'inline-flex', alignItems: 'center' }}><EyeOutlined /></a>
+          {w && <Button type="link" icon={<EditOutlined />} onClick={() => onEdit(r)} />}
+          {w && <Popconfirm title="Удалить?" onConfirm={() => onDelete(r.id)}><Button type="link" danger icon={<DeleteOutlined />} /></Popconfirm>}
         </Space>
-      ) : null,
+      ),
     },
   ];
 
   return (
     <>
       <DataTable title="Договоры с клиентами" data={data} columns={columns} loading={loading}
-        searchableKeys={['contractNumber']}
+        searchableKeys={['contractNumber', 'customer.name']}
         toolbar={<Space><ImportExportButtons resource="customer-contracts" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать договор' : 'Новый договор'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing}>

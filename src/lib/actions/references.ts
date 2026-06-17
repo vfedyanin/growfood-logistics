@@ -157,6 +157,29 @@ export async function deleteVehicleType(code: string) {
   revalidatePath('/references/vehicle-types');
 }
 
+// ============ AdditionalServices (pure dict, PK = code) ============
+export async function getAdditionalServices() {
+  await requireAuth();
+  return prisma.additionalService.findMany({ orderBy: { name: 'asc' } });
+}
+export async function createAdditionalService(data: any) {
+  await requirePermission(W);
+  const r = await prisma.additionalService.create({ data: { code: data.code, name: data.name } });
+  revalidatePath('/references/additional-services');
+  return r;
+}
+export async function updateAdditionalService(code: string, data: any) {
+  await requirePermission(W);
+  const r = await prisma.additionalService.update({ where: { code }, data: { name: data.name } });
+  revalidatePath('/references/additional-services');
+  return r;
+}
+export async function deleteAdditionalService(code: string) {
+  await requirePermission(W);
+  await prisma.additionalService.delete({ where: { code } });
+  revalidatePath('/references/additional-services');
+}
+
 // ============ Vehicles ============
 export async function getVehicles() {
   await requireAuth();

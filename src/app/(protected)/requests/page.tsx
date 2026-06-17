@@ -160,8 +160,7 @@ export default function RequestsPage() {
   const [tplForm] = Form.useForm();
   const [tplSaveOpen, setTplSaveOpen] = useState(false);
 
-  // детальная карточка
-  const [viewOpen, setViewOpen] = useState(false);
+  // детальная карточка (только для edit-формы)
   const [viewReq, setViewReq] = useState<any>(null);
 
   // груз (add/edit) в карточке
@@ -304,8 +303,6 @@ export default function RequestsPage() {
     } catch (e: any) { message.error(e?.message || 'Ошибка сохранения'); }
   };
 
-  const openView = async (r: any) => { const req = await getRequest(r.id); setViewReq(req); loadTariffs(req?.customerId); setViewOpen(true); };
-
   // ---- груз в карточке (с плечами) ----
   const openAddCargo = () => { setEditingCargo(null); cargoForm.resetFields(); cargoForm.setFieldsValue({ unitType: 'PALLET', pricingMode: 'CARGO', legs: [{}] }); setCargoOpen(true); };
   const openEditCargo = (c: any) => {
@@ -432,7 +429,7 @@ export default function RequestsPage() {
       title: 'Действия', key: 'actions', width: 160,
       render: (_: any, r: any) => (
         <Space>
-          <Button type="link" icon={<EyeOutlined />} onClick={() => openView(r)} />
+          <a href={`/requests/${r.id}`} style={{ color: '#1677ff', padding: '4px', display: 'inline-flex', alignItems: 'center' }}><EyeOutlined /></a>
           {canWrite && <Button type="link" icon={<EditOutlined />} onClick={() => onEdit(r)} />}
           {canWrite && (
             <Dropdown menu={{ items: (nextStatus[r.status] || []).map((s) => ({ key: s, label: statusCfg[s]?.label, danger: s === 'CANCELLED' })), onClick: ({ key }) => onStatus(r.id, key) }} disabled={!(nextStatus[r.status] || []).length}>
@@ -509,7 +506,18 @@ export default function RequestsPage() {
         onSubmit={onSubmit} onCancel={() => setOpen(false)} width={860} isEditing={!!editing}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', padding: 8, background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, marginBottom: 12 }}>
           <Text type="secondary">Шаблон:</Text>
-          <Select placeholder="Заполнить из шаблона" style={{ minWidth: 240 }} allowClear value={selTemplate} onChange={(v) => applyTemplate(v)} options={templates.map((t) => ({ value: t.id, label: t.name }))} />
+          <Select
+            placeholder="Заполнить из шаблона"
+            style={{ minWidth: 240 }}
+            allowClear
+            showSearch
+            filterOption={(input, option) =>
+              String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            value={selTemplate}
+            onChange={(v) => applyTemplate(v)}
+            options={templates.map((t) => ({ value: t.id, label: t.name }))}
+          />
           <Button onClick={openSaveTemplate}>Сохранить как шаблон</Button>
           {selTemplate && <Popconfirm title="Удалить шаблон?" onConfirm={deleteSelectedTemplate}><Button danger>Удалить шаблон</Button></Popconfirm>}
         </div>
@@ -560,47 +568,6 @@ export default function RequestsPage() {
         )}
         {editing && viewReq && viewReq.id === editing.id && renderCargoes(viewReq)}
       </EntityForm>
-
-      {/* ===== Детальная карточка ===== */}
-      <Modal open={viewOpen} onCancel={() => setViewOpen(false)} footer={null} width={1000}
-        title={viewReq ? `Заявка ${viewReq.requestNumber}` : 'Заявка'}>
-        {viewReq && (
-          <>
-            <Space style={{ marginBottom: 12 }} wrap>
-              <Tag color={statusCfg[viewReq.status]?.color}>{statusCfg[viewReq.status]?.label}</Tag>
-              {canWrite && <Button size="small" icon={<CarOutlined />} onClick={onCreateTrip}>Создать рейс из заявки</Button>}
-              {canWrite && (
-                <Popconfirm title={`Создать счёт на ${rub(reqSum(viewReq))}?`} onConfirm={onCreateInvoice}>
-                  <Button size="small" icon={<FileTextOutlined />}>Создать счёт</Button>
-                </Popconfirm>
-              )}
-            </Space>
-            <Descriptions bordered size="small" column={2}>
-              <Descriptions.Item label="Заявитель">{viewReq.customer?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Плательщик">{viewReq.payer?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Вертикаль">{viewReq.vertical?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Дата заявки">{fmt(viewReq.requestDate)}</Descriptions.Item>
-              <Descriptions.Item label="Отправитель">{viewReq.shipper?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Откуда (общее)">{viewReq.pickupLocation?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Куда (общее)">{viewReq.deliveryLocation?.name || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Дата забора">
-                {viewReq.pickupDate ? fmt(viewReq.pickupDate) : '—'}
-                {(viewReq.pickupTimeFrom || viewReq.pickupTimeTo) ? ` · ${viewReq.pickupTimeFrom || '?'}–${viewReq.pickupTimeTo || '?'}` : ''}
-              </Descriptions.Item>
-              <Descriptions.Item label="Дата доставки">
-                {viewReq.deliveryDate ? fmt(viewReq.deliveryDate) : '—'}
-                {(viewReq.deliveryTimeFrom || viewReq.deliveryTimeTo) ? ` · ${viewReq.deliveryTimeFrom || '?'}–${viewReq.deliveryTimeTo || '?'}` : ''}
-              </Descriptions.Item>
-              <Descriptions.Item label="Кол-во паллет">{viewReq.requestedPallets ?? '—'}</Descriptions.Item>
-              <Descriptions.Item label="Тариф «за рейс»">{viewReq.perTripScope === 'REQUEST' ? 'одна сумма на заявку' : 'на каждый груз'}</Descriptions.Item>
-              <Descriptions.Item label="Сумма (итого по грузам)">{rub(reqSum(viewReq))}</Descriptions.Item>
-              <Descriptions.Item label="Счета">{viewReq.invoices?.length ? viewReq.invoices.map((i: any) => `${i.invoiceNumber} (${rub(i.amount)})`).join(', ') : '—'}</Descriptions.Item>
-            </Descriptions>
-
-            {renderCargoes(viewReq)}
-          </>
-        )}
-      </Modal>
 
       {/* ===== Груз (add/edit) с плечами ===== */}
       <Modal open={cargoOpen} title={editingCargo ? 'Редактировать груз' : 'Добавить груз'} onOk={submitCargo} onCancel={() => setCargoOpen(false)} okText="Сохранить" cancelText="Отмена" width={720}>

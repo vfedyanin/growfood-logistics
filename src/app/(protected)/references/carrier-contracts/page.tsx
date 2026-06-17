@@ -76,7 +76,7 @@ export default function CarrierContractsPage() {
   return (
     <>
       <DataTable title="Договоры с перевозчиками" data={data} columns={columns} loading={loading}
-        searchableKeys={['contractNumber']}
+        searchableKeys={['contractNumber', 'carrier.name']}
         toolbar={<Space><ImportExportButtons resource="carrier-contracts" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать договор' : 'Новый договор'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing}>

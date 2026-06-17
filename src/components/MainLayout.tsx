@@ -21,6 +21,8 @@ import {
   NodeIndexOutlined,
   ContainerOutlined,
   SettingOutlined,
+  SnippetsOutlined,
+  PlusSquareOutlined,
 } from '@ant-design/icons';
 import { useRouter, usePathname } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
@@ -48,11 +50,13 @@ const menuItems: MenuItem[] = [
     getItem('Груз', '/operations/cargo'),
   ]),
   getItem('Справочники', '/references', <BookOutlined />, [
+    getItem('Шаблоны', '/references/templates', <SnippetsOutlined />),
     getItem('Вертикали', '/references/verticals', <AppstoreOutlined />),
     getItem('Локации', '/references/locations', <EnvironmentOutlined />),
     getItem('Контрагенты', '/references/customers', <ShopOutlined />),
     getItem('Перевозчики', '/references/carriers', <TeamOutlined />),
     getItem('Типы ТС', '/references/vehicle-types', <CarOutlined />),
+    getItem('Доп. услуги', '/references/additional-services', <PlusSquareOutlined />),
     getItem('Транспорт', '/references/vehicles', <ContainerOutlined />),
     getItem('Водители', '/references/drivers', <IdcardOutlined />),
     getItem('Маршруты', '/references/routes', <NodeIndexOutlined />),

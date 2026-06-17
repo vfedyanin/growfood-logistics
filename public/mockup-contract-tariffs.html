@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<title>Макет: Договор с тарифами</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; font-size: 13px; }
+  .page { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+
+  /* Breadcrumb */
+  .breadcrumb { color: #888; margin-bottom: 16px; font-size: 12px; }
+  .breadcrumb a { color: #1677ff; text-decoration: none; }
+  .breadcrumb span { margin: 0 6px; }
+
+  /* Card */
+  .card { background: #fff; border-radius: 8px; border: 1px solid #e8e8e8; margin-bottom: 16px; }
+  .card-header { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; justify-content: space-between; }
+  .card-title { font-size: 15px; font-weight: 600; }
+  .card-body { padding: 20px; }
+
+  /* Descriptions */
+  .desc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px 24px; }
+  .desc-item label { color: #888; font-size: 12px; display: block; margin-bottom: 2px; }
+  .desc-item value { font-size: 13px; font-weight: 500; }
+
+  /* Tag */
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 12px; border: 1px solid; }
+  .tag-green { background: #f6ffed; border-color: #b7eb8f; color: #52c41a; }
+  .tag-blue { background: #e6f4ff; border-color: #91caff; color: #1677ff; }
+  .tag-orange { background: #fff7e6; border-color: #ffd591; color: #fa8c16; }
+
+  /* Divider */
+  .section-divider { border: none; border-top: 1px solid #f0f0f0; margin: 20px 0; }
+
+  /* Tariff group */
+  .tariff-group { margin-bottom: 24px; }
+  .tariff-group-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .tariff-group-date { font-size: 13px; font-weight: 600; color: #1677ff; background: #e6f4ff; border: 1px solid #91caff; border-radius: 4px; padding: 2px 10px; }
+  .tariff-group-note { color: #888; font-size: 12px; }
+
+  /* Table */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .tbl th { background: #fafafa; border: 1px solid #e8e8e8; padding: 7px 10px; font-weight: 600; color: #555; text-align: center; white-space: nowrap; }
+  .tbl th.left { text-align: left; }
+  .tbl td { border: 1px solid #f0f0f0; padding: 6px 10px; text-align: center; vertical-align: middle; }
+  .tbl td.left { text-align: left; }
+  .tbl tr:hover td { background: #fafafa; }
+  .tbl .price { font-family: monospace; color: #222; }
+  .tbl .price-empty { color: #ccc; }
+  .tbl .route { font-weight: 500; }
+  .tbl .type-tag { font-size: 11px; padding: 1px 6px; border-radius: 3px; }
+  .tbl .type-pallet { background: #f9f0ff; color: #722ed1; border: 1px solid #d3adf7; }
+  .tbl .type-trip { background: #e6f4ff; color: #1677ff; border: 1px solid #91caff; }
+  .tbl .col-vt { background: #fffbe6; }
+  .tbl th.col-vt { background: #fffbe6; color: #ad6800; border-color: #ffd591; }
+
+  /* VAT badge */
+  .vat-badge { font-size: 10px; color: #888; margin-left: 4px; }
+
+  /* Add button */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 6px; border: 1px solid; cursor: pointer; font-size: 13px; font-weight: 500; }
+  .btn-primary { background: #1677ff; border-color: #1677ff; color: #fff; }
+  .btn-default { background: #fff; border-color: #d9d9d9; color: #333; }
+  .btn-dashed { background: #fff; border: 1px dashed #d9d9d9; color: #666; width: 100%; justify-content: center; padding: 8px; margin-top: 8px; }
+  .btn-dashed:hover { border-color: #1677ff; color: #1677ff; }
+
+  /* Form mockup */
+  .form-card { background: #fafafa; border: 1px dashed #1677ff; border-radius: 6px; padding: 16px; margin-top: 12px; }
+  .form-title { font-size: 13px; font-weight: 600; color: #1677ff; margin-bottom: 12px; }
+  .form-row { display: flex; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .form-field { display: flex; flex-direction: column; gap: 4px; }
+  .form-field label { font-size: 11px; color: #888; }
+  .form-field .input { border: 1px solid #d9d9d9; border-radius: 5px; padding: 5px 10px; font-size: 12px; background: #fff; color: #333; min-width: 140px; }
+  .form-field .input.small { min-width: 80px; }
+  .form-field .input.select { appearance: none; padding-right: 24px; }
+  .vat-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #555; margin-bottom: 10px; }
+  .toggle { width: 32px; height: 18px; background: #1677ff; border-radius: 9px; position: relative; cursor: pointer; }
+  .toggle::after { content: ''; position: absolute; width: 14px; height: 14px; background: #fff; border-radius: 50%; top: 2px; right: 2px; }
+
+  /* Price grid for PER_TRIP */
+  .price-grid { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+  .price-grid .vt-input { display: flex; flex-direction: column; gap: 3px; align-items: center; }
+  .price-grid .vt-label { font-size: 10px; color: #888; white-space: nowrap; }
+  .price-grid input { border: 1px solid #d9d9d9; border-radius: 5px; padding: 5px 6px; font-size: 12px; width: 72px; text-align: right; }
+
+  .section-note { font-size: 11px; color: #aaa; font-style: italic; margin-top: 4px; }
+
+  /* Edit/Delete icons */
+  .action-icons { display: flex; gap: 6px; justify-content: center; }
+  .icon-btn { color: #1677ff; background: none; border: none; cursor: pointer; font-size: 13px; padding: 2px 4px; }
+  .icon-btn.del { color: #ff4d4f; }
+
+  .empty-col { color: #e0e0e0; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Breadcrumb -->
+  <div class="breadcrumb">
+    <a href="#">Справочники</a><span>›</span>
+    <a href="#">Договоры с клиентами</a><span>›</span>
+    <span>Д-003/2026 — КВ (Кухня высокой кухни)</span>
+  </div>
+
+  <!-- Contract header -->
+  <div class="card">
+    <div class="card-header">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="card-title">Д-003/2026</span>
+        <span class="tag tag-green">Активен</span>
+        <span class="tag tag-blue">LaaS-услуга</span>
+        <span class="tag" style="background:#fff7e6;border-color:#ffd591;color:#d46b08">НДС 22%</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-default">✏️ Редактировать</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="desc-grid">
+        <div class="desc-item"><label>Клиент</label><value>КВ (Кухня высокой кухни)</value></div>
+        <div class="desc-item"><label>Тип договора</label><value>LaaS-услуга</value></div>
+        <div class="desc-item"><label>Ставка НДС</label><value>22%</value></div>
+        <div class="desc-item"><label>Действует с</label><value>01.01.2026</value></div>
+        <div class="desc-item"><label>Действует по</label><value>—</value></div>
+        <div class="desc-item"><label>Условия оплаты</label><value>30 дней с даты акта</value></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tariffs section -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Тарифы по направлениям</span>
+      <button class="btn btn-primary">+ Добавить тариф</button>
+    </div>
+    <div class="card-body">
+
+      <!-- Group 1: from 01.04.2026 -->
+      <div class="tariff-group">
+        <div class="tariff-group-header">
+          <span class="tariff-group-date">с 01.04.2026</span>
+          <span class="tariff-group-note">8 тарифов</span>
+        </div>
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th class="left" rowspan="2" style="width:120px">Откуда</th>
+              <th class="left" rowspan="2" style="width:160px">Куда</th>
+              <th rowspan="2" style="width:90px">Тип</th>
+              <th rowspan="2" style="width:90px">По паллетам</th>
+              <th colspan="7" class="col-vt">За рейс — по типу ТС (нетто, ₽)</th>
+              <th rowspan="2" style="width:60px">Действия</th>
+            </tr>
+            <tr>
+              <th class="col-vt">VT-4</th>
+              <th class="col-vt">VT-8</th>
+              <th class="col-vt">VT-12</th>
+              <th class="col-vt">VT-15</th>
+              <th class="col-vt">VT-18</th>
+              <th class="col-vt">VT-20</th>
+              <th class="col-vt">VT-33</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="left route">РЦ МСК</td>
+              <td class="left">Самокат Воронеж</td>
+              <td><span class="type-tag type-pallet">паллет</span></td>
+              <td class="price">3 800 ₽<span class="vat-badge">нетто</span></td>
+              <td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td>
+              <td><div class="action-icons"><button class="icon-btn">✏️</button><button class="icon-btn del">🗑</button></div></td>
+            </tr>
+            <tr>
+              <td class="left route">РЦ МСК</td>
+              <td class="left">Самокат Пенза</td>
+              <td><span class="type-tag type-pallet">паллет</span></td>
+              <td class="price">9 000 ₽<span class="vat-badge">нетто</span></td>
+              <td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td>
+              <td><div class="action-icons"><button class="icon-btn">✏️</button><button class="icon-btn del">🗑</button></div></td>
+            </tr>
+            <tr>
+              <td class="left route">РЦ МСК</td>
+              <td class="left">Пятёрочка НН</td>
+              <td><span class="type-tag type-pallet">паллет</span></td>
+              <td class="price">5 500 ₽<span class="vat-badge">нетто</span></td>
+              <td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td>
+              <td><div class="action-icons"><button class="icon-btn">✏️</button><button class="icon-btn del">🗑</button></div></td>
+            </tr>
+            <tr>
+              <td class="left route">РЦ МСК</td>
+              <td class="left">Самокат Воронеж</td>
+              <td><span class="type-tag type-trip">рейс</span></td>
+              <td class="price-empty">—</td>
+              <td class="price-empty">—</td>
+              <td class="price">27 868<span class="vat-badge">нетто</span></td>
+              <td class="price-empty">—</td>
+              <td class="price">34 426<span class="vat-badge">нетто</span></td>
+              <td class="price">43 443<span class="vat-badge">нетто</span></td>
+              <td class="price-empty">—</td>
+              <td class="price">61 475<span class="vat-badge">нетто</span></td>
+              <td><div class="action-icons"><button class="icon-btn">✏️</button><button class="icon-btn del">🗑</button></div></td>
+            </tr>
+            <tr>
+              <td class="left route">РЦ МСК</td>
+              <td class="left">Самокат Казань</td>
+              <td><span class="type-tag type-trip">рейс</span></td>
+              <td class="price-empty">—</td>
+              <td class="price-empty">—</td>
+              <td class="price">49 180<span class="vat-badge">нетто</span></td>
+              <td class="price-empty">—</td>
+              <td class="price">63 115<span class="vat-badge">нетто</span></td>
+              <td class="price">72 131<span class="vat-badge">нетто</span></td>
+              <td class="price-empty">—</td>
+              <td class="price">98 361<span class="vat-badge">нетто</span></td>
+              <td><div class="action-icons"><button class="icon-btn">✏️</button><button class="icon-btn del">🗑</button></div></td>
+            </tr>
+            <tr>
+              <td class="left route">КД Казань</td>
+              <td class="left">Самокат Ижевск</td>
+              <td><span class="type-tag type-trip">рейс</span></td>
+              <td class="price-empty">—</td>
+              <td class="price-empty">—</td>
+              <td class="price">27 868<span class="vat-badge">нетто</span></td>
+              <td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td><td class="price-empty">—</td>
+              <td><div class="action-icons"><button class="icon-btn">✏️</button><button class="icon-btn del">🗑</button></div></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr class="section-divider"/>
+
+      <!-- Group 2: from 01.01.2026 -->
+      <div class="tariff-group">
+        <div class="tariff-group-header">
+          <span class="tariff-group-date" style="background:#f9f0ff;border-color:#d3adf7;color:#722ed1">с 01.01.2026</span>
+          <span class="tariff-group-note">3 тарифа · устаревшие</span>
+        </div>
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th class="left" rowspan="2">Откуда</th>
+              <th class="left" rowspan="2">Куда</th>
+              <th rowspan="2">Тип</th>
+              <th rowspan="2">По паллетам</th>
+              <th colspan="7" class="col-vt">За рейс — по типу ТС (нетто, ₽)</th>
+              <th rowspan="2">Действия</th>
+            </tr>
+            <tr>
+              <th class="col-vt">VT-4</th><th class="col-vt">VT-8</th><th class="col-vt">VT-12</th>
+              <th class="col-vt">VT-15</th><th class="col-vt">VT-18</th><th class="col-vt">VT-20</th><th class="col-vt">VT-33</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="color:#aaa">
+              <td class="left">РЦ МСК</td>
+              <td class="left">Самокат Воронеж</td>
+              <td><span class="type-tag type-pallet" style="opacity:.5">паллет</span></td>
+              <td class="price" style="color:#aaa">3 500 ₽</td>
+              <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+              <td><div class="action-icons"><button class="icon-btn del">🗑</button></div></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Add tariff form (expanded) -->
+      <div class="form-card">
+        <div class="form-title">+ Новый тариф</div>
+
+        <div class="form-row">
+          <div class="form-field">
+            <label>Действует с *</label>
+            <input class="input small" type="text" value="01.06.2026"/>
+          </div>
+          <div class="form-field">
+            <label>Откуда *</label>
+            <select class="input select"><option>РЦ МСК (Бирюлёво)</option><option>КД Север</option><option>КД Казань</option></select>
+          </div>
+          <div class="form-field">
+            <label>Куда *</label>
+            <select class="input select"><option>Самокат Воронеж</option><option>Пятёрочка НН</option><option>Самокат Казань</option></select>
+          </div>
+          <div class="form-field">
+            <label>Тип тарифа *</label>
+            <select class="input select small"><option>За паллет</option><option selected>За рейс</option></select>
+          </div>
+        </div>
+
+        <!-- VAT toggle -->
+        <div class="vat-toggle">
+          <div class="toggle"></div>
+          <span><b>Ввожу с НДС</b> — система сохранит нетто автоматически (÷ 1.22)</span>
+        </div>
+
+        <!-- If type = PER_TRIP: price grid by VehicleType -->
+        <div style="margin-bottom:10px">
+          <div style="font-size:11px;color:#888;margin-bottom:6px">Цена за рейс по типу ТС (оставьте пустым если не используется):</div>
+          <div class="price-grid">
+            <div class="vt-input"><span class="vt-label">VT-4</span><input type="text" placeholder="—"/></div>
+            <div class="vt-input"><span class="vt-label">VT-8</span><input type="text" value="34 000"/></div>
+            <div class="vt-input"><span class="vt-label">VT-12</span><input type="text" placeholder="—"/></div>
+            <div class="vt-input"><span class="vt-label">VT-15</span><input type="text" value="42 000"/></div>
+            <div class="vt-input"><span class="vt-label">VT-18</span><input type="text" value="53 000"/></div>
+            <div class="vt-input"><span class="vt-label">VT-20</span><input type="text" placeholder="—"/></div>
+            <div class="vt-input"><span class="vt-label">VT-33</span><input type="text" value="75 000"/></div>
+          </div>
+          <div class="section-note">* введено с НДС → будет сохранено: VT-8: 27 868 ₽, VT-15: 34 426 ₽, VT-18: 43 443 ₽, VT-33: 61 475 ₽</div>
+        </div>
+
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary">Сохранить</button>
+          <button class="btn btn-default">Отмена</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Additional Services -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Дополнительные услуги</span>
+      <button class="btn btn-primary">+ Добавить</button>
+    </div>
+    <div class="card-body" style="padding:0">
+      <table class="tbl" style="margin:0">
+        <thead>
+          <tr>
+            <th class="left" style="width:160px">Код</th>
+            <th class="left">Название</th>
+            <th style="width:80px">Действия</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="left"><span style="font-family:monospace;font-size:12px;background:#f5f5f5;padding:1px 6px;border-radius:3px;border:1px solid #e8e8e8">WAIT</span></td>
+            <td class="left">Ожидание (час)</td>
+            <td><div class="action-icons"><button class="icon-btn">✏️</button><button class="icon-btn del">🗑</button></div></td>
+          </tr>
+          <tr>
+            <td class="left"><span style="font-family:monospace;font-size:12px;background:#f5f5f5;padding:1px 6px;border-radius:3px;border:1px solid #e8e8e8">RETURN</span></td>
+            <td class="left">Возврат тары</td>
+            <td><div class="action-icons"><button class="icon-btn">✏️</button><button class="icon-btn del">🗑</button></div></td>
+          </tr>
+          <tr>
+            <td class="left"><span style="font-family:monospace;font-size:12px;background:#f5f5f5;padding:1px 6px;border-radius:3px;border:1px solid #e8e8e8">FORKLIFT</span></td>
+            <td class="left">Погрузчик</td>
+            <td><div class="action-icons"><button class="icon-btn">✏️</button><button class="icon-btn del">🗑</button></div></td>
+          </tr>
+          <tr>
+            <td class="left"><span style="font-family:monospace;font-size:12px;background:#f5f5f5;padding:1px 6px;border-radius:3px;border:1px solid #e8e8e8">ESCORT</span></td>
+            <td class="left">Экспедирование</td>
+            <td><div class="action-icons"><button class="icon-btn">✏️</button><button class="icon-btn del">🗑</button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Notes -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Заметки</span>
+      <button class="btn btn-default">✏️ Редактировать</button>
+    </div>
+    <div class="card-body">
+      <div style="color:#555;font-size:13px;line-height:1.6;white-space:pre-wrap;min-height:60px">КВ и Перспектива — один плательщик, тарифы скомпилированные.
+Оплата в течение 30 дней с даты подписания акта.
+Тарифы за рейс действуют при полной загрузке машины.</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
