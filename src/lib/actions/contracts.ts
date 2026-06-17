@@ -67,10 +67,10 @@ export async function findGroupSiblings(requestId: string) {
     where: { customerId: req.customerId },
     select: { id: true },
   });
-  const contractIds = [...new Set([
+  const contractIds = Array.from(new Set([
     ...memberContracts.map(m => m.contractId),
     ...mainContracts.map(c => c.id),
-  ])];
+  ]));
   if (!contractIds.length) return [];
 
   // Все клиенты из этих договоров

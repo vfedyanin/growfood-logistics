@@ -42,7 +42,7 @@ export async function deleteTripTemplate(id: string) {
 export async function getTripTemplatesFull() {
   await requireAuth();
   const templates = await prisma.tripTemplate.findMany({ orderBy: { name: 'asc' } });
-  const carrierIds = [...new Set(templates.map((t: any) => (t.data as any)?.carrierId).filter(Boolean))];
+  const carrierIds = Array.from(new Set(templates.map((t: any) => (t.data as any)?.carrierId).filter(Boolean)));
   const carriers = carrierIds.length
     ? await prisma.carrier.findMany({ where: { id: { in: carrierIds } }, select: { id: true, name: true } })
     : [];
@@ -99,7 +99,7 @@ export async function deleteRequestTemplate(id: string) {
 export async function getRequestTemplatesFull() {
   await requireAuth();
   const templates = await prisma.requestTemplate.findMany({ orderBy: { name: 'asc' } });
-  const customerIds = [...new Set(templates.map((t: any) => (t.data as any)?.customerId).filter(Boolean))];
+  const customerIds = Array.from(new Set(templates.map((t: any) => (t.data as any)?.customerId).filter(Boolean)));
   const customers = customerIds.length
     ? await prisma.customer.findMany({ where: { id: { in: customerIds } }, select: { id: true, name: true } })
     : [];
@@ -130,8 +130,8 @@ export async function getRequestTemplateFull(id: string) {
   }
 
   const [locations, customers] = await Promise.all([
-    locationIds.size ? prisma.location.findMany({ where: { id: { in: [...locationIds] } }, select: { id: true, name: true } }) : [],
-    customerIds.size ? prisma.customer.findMany({ where: { id: { in: [...customerIds] } }, select: { id: true, name: true } }) : [],
+    locationIds.size ? prisma.location.findMany({ where: { id: { in: Array.from(locationIds) } }, select: { id: true, name: true } }) : [],
+    customerIds.size ? prisma.customer.findMany({ where: { id: { in: Array.from(customerIds) } }, select: { id: true, name: true } }) : [],
   ]);
   const locMap = Object.fromEntries(locations.map((l) => [l.id, l.name]));
   const custMap = Object.fromEntries(customers.map((c) => [c.id, c.name]));

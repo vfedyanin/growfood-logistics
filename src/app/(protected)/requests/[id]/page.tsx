@@ -386,7 +386,7 @@ export default function RequestDetailPage() {
       </Descriptions>
 
       {/* Грузы */}
-      <Divider orientation="left">Грузы и плечи</Divider>
+      <Divider orientation={"left" as any}>Грузы и плечи</Divider>
       {canWrite && (
         <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={openAddCargo} style={{ marginBottom: 8 }}>
           Добавить груз
@@ -438,7 +438,7 @@ export default function RequestDetailPage() {
               <TariffPreview tariff={tariffMap[cargoLocId]} pallets={cargoPallets} discount={cargoDiscount} scope="CARGO" />
             </Space>
           )}
-          <Divider orientation="left" style={{ margin: '8px 0' }}>Плечи маршрута</Divider>
+          <Divider orientation={"left" as any} style={{ margin: '8px 0' }}>Плечи маршрута</Divider>
           {editingCargo && (editingCargo.legs || []).some((l: any) => l.tripCargoUnitId) && (
             <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
               Плечи, привязанные к рейсам, редактируются отдельно.

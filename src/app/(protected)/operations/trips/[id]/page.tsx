@@ -97,7 +97,7 @@ function buildStops(units: any[]): Stop[] {
       s.unload.push(u);
     }
   });
-  return [...map.values()].sort((a, b) => a.sortKey - b.sortKey);
+  return Array.from(map.values()).sort((a, b) => a.sortKey - b.sortKey);
 }
 
 // Груз, который ЕДЕТ В МАШИНЕ после точки с индексом fromIdx (т.е. погружен ≤ fromIdx, выгружается > fromIdx)
@@ -105,7 +105,7 @@ function transitAfter(stops: Stop[], fromIdx: number): any[] {
   const stopIds = stops.map(s => s.id);
   const units = new Set<any>();
   stops.forEach(s => { s.load.forEach(u => units.add(u)); s.unload.forEach(u => units.add(u)); });
-  return [...units].filter(u => {
+  return Array.from(units).filter(u => {
     const leg = u.requestCargoLeg;
     if (!leg) return false;
     const pi = stopIds.indexOf(leg.pickupLocationId);
@@ -319,7 +319,7 @@ function TripStopsView({ cargoUnits, canRemove, onRemove }: { cargoUnits: any[];
 
       {noLeg.length > 0 && (
         <div style={{ marginTop: 16 }}>
-          <Divider orientation="left" plain style={{ fontSize: 12, color: '#999' }}>Груз без плеча</Divider>
+          <Divider orientation={"left" as any} plain style={{ fontSize: 12, color: '#999' }}>Груз без плеча</Divider>
           <CargoList units={noLeg} finalDestMap={finalDestMap} canRemove={canRemove} onRemove={onRemove} />
         </div>
       )}
@@ -554,7 +554,7 @@ export default function TripDetailPage() {
       </Descriptions>
 
       {/* Маршрут и грузы */}
-      <Divider orientation="left">Маршрут</Divider>
+      <Divider orientation={"left" as any}>Маршрут</Divider>
       {canCargo && (
         <Space style={{ marginBottom: 12 }} wrap>
           <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={openCargo}>
@@ -570,7 +570,7 @@ export default function TripDetailPage() {
       />
 
       {/* События качества */}
-      <Divider orientation="left">События качества</Divider>
+      <Divider orientation={"left" as any}>События качества</Divider>
       {trip.qualityEvents?.length ? (
         <Table
           size="small"
