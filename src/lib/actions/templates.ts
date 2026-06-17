@@ -38,6 +38,34 @@ export async function deleteTripTemplate(id: string) {
   revalidatePath('/operations/trips');
 }
 
+// ============ Enriched: шаблоны рейсов с именами ============
+export async function getTripTemplatesFull() {
+  await requireAuth();
+  const templates = await prisma.tripTemplate.findMany({ orderBy: { name: 'asc' } });
+  const carrierIds = Array.from(new Set(templates.map((t: any) => (t.data as any)?.carrierId).filter(Boolean)));
+  const carriers = carrierIds.length
+    ? await prisma.carrier.findMany({ where: { id: { in: carrierIds } }, select: { id: true, name: true } })
+    : [];
+  const carrierMap = Object.fromEntries(carriers.map((c) => [c.id, c.name]));
+  return templates.map((t) => {
+    const d = t.data as any;
+    return { ...t, carrierName: carrierMap[d?.carrierId] ?? null };
+  });
+}
+
+export async function getTripTemplateFull(id: string) {
+  await requireAuth();
+  const tpl = await prisma.tripTemplate.findUnique({ where: { id } });
+  if (!tpl) return null;
+  const d = tpl.data as any;
+  const carrierIds = [d?.carrierId].filter(Boolean);
+  const carriers = carrierIds.length
+    ? await prisma.carrier.findMany({ where: { id: { in: carrierIds } }, select: { id: true, name: true } })
+    : [];
+  const carrierMap = Object.fromEntries(carriers.map((c) => [c.id, c.name]));
+  return { ...tpl, carrierName: carrierMap[d?.carrierId] ?? null };
+}
+
 // ============ Шаблоны заявок ============
 export async function getRequestTemplates() {
   await requireAuth();
@@ -65,4 +93,64 @@ export async function deleteRequestTemplate(id: string) {
   await requireRole(W);
   await prisma.requestTemplate.delete({ where: { id } });
   revalidatePath('/requests');
+}
+
+// ============ Enriched: шаблоны заявок с именами ============
+export async function getRequestTemplatesFull() {
+  await requireAuth();
+  const templates = await prisma.requestTemplate.findMany({ orderBy: { name: 'asc' } });
+  const customerIds = Array.from(new Set(templates.map((t: any) => (t.data as any)?.customerId).filter(Boolean)));
+  const customers = customerIds.length
+    ? await prisma.customer.findMany({ where: { id: { in: customerIds } }, select: { id: true, name: true } })
+    : [];
+  const custMap = Object.fromEntries(customers.map((c) => [c.id, c.name]));
+  return templates.map((t) => {
+    const d = t.data as any;
+    return { ...t, customerName: custMap[d?.customerId] ?? null };
+  });
+}
+
+export async function getRequestTemplateFull(id: string) {
+  await requireAuth();
+  const tpl = await prisma.requestTemplate.findUnique({ where: { id } });
+  if (!tpl) return null;
+  const d = tpl.data as any;
+
+  const locationIds = new Set<string>();
+  const customerIds = new Set<string>();
+  if (d?.customerId) customerIds.add(d.customerId);
+  if (d?.payerId) customerIds.add(d.payerId);
+  if (d?.shipperId) customerIds.add(d.shipperId);
+  for (const c of d?.cargoes ?? []) {
+    if (c.consigneeLocationId) locationIds.add(c.consigneeLocationId);
+    for (const l of c.legs ?? []) {
+      if (l.pickupLocationId) locationIds.add(l.pickupLocationId);
+      if (l.dropoffLocationId) locationIds.add(l.dropoffLocationId);
+    }
+  }
+
+  const [locations, customers] = await Promise.all([
+    locationIds.size ? prisma.location.findMany({ where: { id: { in: Array.from(locationIds) } }, select: { id: true, name: true } }) : [],
+    customerIds.size ? prisma.customer.findMany({ where: { id: { in: Array.from(customerIds) } }, select: { id: true, name: true } }) : [],
+  ]);
+  const locMap = Object.fromEntries(locations.map((l) => [l.id, l.name]));
+  const custMap = Object.fromEntries(customers.map((c) => [c.id, c.name]));
+
+  return {
+    ...tpl,
+    resolved: {
+      customer: custMap[d?.customerId] ?? null,
+      payer: custMap[d?.payerId] ?? null,
+      shipper: custMap[d?.shipperId] ?? null,
+      cargoes: (d?.cargoes ?? []).map((c: any) => ({
+        ...c,
+        consigneeName: locMap[c.consigneeLocationId] ?? null,
+        legs: (c.legs ?? []).map((l: any) => ({
+          ...l,
+          pickupName: locMap[l.pickupLocationId] ?? null,
+          dropoffName: locMap[l.dropoffLocationId] ?? null,
+        })),
+      })),
+    },
+  };
 }

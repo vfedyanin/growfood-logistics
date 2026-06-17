@@ -42,6 +42,7 @@ export default function DataTable<T extends Record<string, any>>({
   size = 'middle',
 }: DataTableProps<T>) {
   const [search, setSearch] = useState('');
+  const [currentPageSize, setCurrentPageSize] = useState(pageSize);
 
   const filtered = useMemo(() => {
     if (!search || !searchableKeys?.length) return data;
@@ -91,9 +92,11 @@ export default function DataTable<T extends Record<string, any>>({
         size={size}
         scroll={{ x: scrollX }}
         pagination={{
-          pageSize,
+          pageSize: currentPageSize,
           showSizeChanger: true,
+          pageSizeOptions: ['20', '50', '100', '200'],
           showTotal: (t) => `Всего: ${t}`,
+          onShowSizeChange: (_, size) => setCurrentPageSize(size),
         }}
       />
     </>

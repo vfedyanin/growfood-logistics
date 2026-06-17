@@ -62,8 +62,14 @@ export async function getTrip(id: string) {
       ...tripInclude,
       cargoUnits: {
         include: {
-          vertical: true, customer: true, shipper: true, request: true,
-          requestCargoLeg: { include: { pickupLocation: true, dropoffLocation: true } },
+          vertical: true, customer: true, shipper: true,
+          request: { include: { deliveryLocation: true } },
+          requestCargoLeg: {
+            include: {
+              pickupLocation: true, dropoffLocation: true,
+              cargo: { include: { consigneeLocation: true } },
+            },
+          },
         },
       },
       qualityEvents: { orderBy: { createdAt: 'desc' } },

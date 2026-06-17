@@ -183,6 +183,7 @@ model Customer {
   invoices            Invoice[]
   payments            Payment[]
   deliveryLocations   CustomerDeliveryLocation[]
+  contractMemberships CustomerContractMember[]
 }
 
 model CustomerDeliveryLocation {
@@ -255,6 +256,14 @@ model VehicleType {
   tariffs      Tariff[]
   marketPrices MarketPrice[]
   trips        Trip[]        @relation("TripVehicleType")
+  tariffTiers  TariffTier[]
+}
+
+model AdditionalService {
+  code      String   @id // WAIT, RETURN, FORKLIFT, ESCORT, …
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Vehicle {
@@ -310,9 +319,20 @@ model CustomerContract {
   createdById    String?
   updatedById    String?
 
-  customer Customer      @relation(fields: [customerId], references: [id])
-  tariffs  Tariff[]      @relation("CustContractTariff")
+  customer Customer                  @relation(fields: [customerId], references: [id])
+  tariffs  Tariff[]                  @relation("CustContractTariff")
   acts     CustomerAct[]
+  members  CustomerContractMember[]
+}
+
+model CustomerContractMember {
+  contractId String
+  customerId String
+
+  contract CustomerContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  customer Customer         @relation(fields: [customerId], references: [id])
+
+  @@id([contractId, customerId])
 }
 
 enum ContractType {
@@ -343,26 +363,38 @@ model CarrierContract {
 // Полиморфизм: ровно один из customerContractId / carrierContractId NOT NULL
 // (CHECK-констрейнт добавляется отдельным SQL после db push)
 model Tariff {
-  id                 String    @id @default(cuid())
+  id                 String       @id @default(cuid())
   customerContractId String?
   carrierContractId  String?
   routeId            String?
-  vehicleTypeCode    String
-  pricePerTrip       Decimal?  @db.Decimal(12, 2)
-  pricePerPallet     Decimal?  @db.Decimal(12, 2)
-  pricePerKm         Decimal?  @db.Decimal(8, 2)
+  vehicleTypeCode    String?
+  tariffType         TariffMethod @default(PER_PALLET)
+  pricePerTrip       Decimal?     @db.Decimal(12, 2)
+  pricePerPallet     Decimal?     @db.Decimal(12, 2)
+  pricePerKm         Decimal?     @db.Decimal(8, 2)
   validFrom          DateTime
   validTo            DateTime?
   notes              String?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
   createdById        String?
   updatedById        String?
 
   customerContract CustomerContract? @relation("CustContractTariff", fields: [customerContractId], references: [id])
   carrierContract  CarrierContract?  @relation("CarrContractTariff", fields: [carrierContractId], references: [id])
   route            Route?            @relation(fields: [routeId], references: [id])
-  vehicleType      VehicleType       @relation(fields: [vehicleTypeCode], references: [code])
+  vehicleType      VehicleType?      @relation(fields: [vehicleTypeCode], references: [code])
+  tiers            TariffTier[]
+}
+
+model TariffTier {
+  id              String  @id @default(cuid())
+  tariffId        String
+  vehicleTypeCode String
+  price           Decimal @db.Decimal(12, 2)
+
+  tariff      Tariff      @relation(fields: [tariffId], references: [id], onDelete: Cascade)
+  vehicleType VehicleType @relation(fields: [vehicleTypeCode], references: [code])
 }
 
 model MarketPrice {
@@ -625,6 +657,10 @@ model CustomerRequest {
   updatedAt          DateTime         @updatedAt
   createdById        String?
   updatedById        String?
+
+  parentRequestId  String?
+  parent           CustomerRequest?  @relation("RequestGroup", fields: [parentRequestId], references: [id], onDelete: SetNull)
+  groupChildren    CustomerRequest[] @relation("RequestGroup")
 
   customer         Customer       @relation("ReqCustomer", fields: [customerId], references: [id])
   payer            Customer?      @relation("ReqPayer", fields: [payerId], references: [id])

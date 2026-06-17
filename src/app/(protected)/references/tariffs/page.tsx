@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Button, Form, Input, InputNumber, Segmented, DatePicker, Space, Popconfirm, Tag, message } from 'antd';
+import { Button, Form, Input, InputNumber, Segmented, DatePicker, Space, Popconfirm, Tag, Switch, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
@@ -32,6 +32,7 @@ export default function TariffsPage() {
   const pPallet = Form.useWatch('pricePerPallet', form);
   const pKm = Form.useWatch('pricePerKm', form);
   const [vatRate, setVatRate] = useState(0);
+  const [priceIncludesVat, setPriceIncludesVat] = useState(false);
 
   const load = async () => { setLoading(true); try { setData(await getTariffs()); } finally { setLoading(false); } };
   useEffect(() => { load(); }, []);
@@ -44,10 +45,11 @@ export default function TariffsPage() {
     // eslint-disable-next-line
   }, [contractSide, custId, carrId, open]);
 
-  const onAdd = () => { setEditing(null); form.resetFields(); setVatRate(0); form.setFieldsValue({ contractSide: 'CUSTOMER' }); setOpen(true); };
+  const onAdd = () => { setEditing(null); form.resetFields(); setVatRate(0); setPriceIncludesVat(false); form.setFieldsValue({ contractSide: 'CUSTOMER' }); setOpen(true); };
   const onEdit = (r: any) => {
     setEditing(r);
     setVatRate(tariffVat(r));
+    setPriceIncludesVat(false);
     form.setFieldsValue({
       ...r,
       contractSide: r.carrierContractId ? 'CARRIER' : 'CUSTOMER',
@@ -60,9 +62,21 @@ export default function TariffsPage() {
     try { await deleteTariff(id); message.success('Удалено'); load(); }
     catch { message.error('Не удалось удалить'); }
   };
+  const toNet = (v: any) => {
+    if (v == null || !priceIncludesVat || !vatRate) return v;
+    return Math.round(Number(v) / (1 + vatRate / 100) * 100) / 100;
+  };
+
   const onSubmit = async () => {
     const v = await form.validateFields();
-    const payload = { ...v, validFrom: v.validFrom?.toISOString(), validTo: v.validTo ? v.validTo.toISOString() : null };
+    const payload = {
+      ...v,
+      pricePerTrip: toNet(v.pricePerTrip),
+      pricePerPallet: toNet(v.pricePerPallet),
+      pricePerKm: toNet(v.pricePerKm),
+      validFrom: v.validFrom?.toISOString(),
+      validTo: v.validTo ? v.validTo.toISOString() : null,
+    };
     try {
       if (editing) await updateTariff(editing.id, payload); else await createTariff(payload);
       message.success('Сохранено'); setOpen(false); load();
@@ -119,17 +133,36 @@ export default function TariffsPage() {
         )}
         <div style={{ marginTop: -8, marginBottom: 12, padding: '6px 10px', background: '#f6f6f6', borderRadius: 6, fontSize: 13 }}>
           Ставка НДС по договору: <b>{vatRate ? `${vatRate}%` : 'без НДС'}</b>
-          <span style={{ color: '#999' }}> · итоговая цена считается из базовой с учётом этой ставки</span>
         </div>
+        {vatRate > 0 && (
+          <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Switch checked={priceIncludesVat} onChange={setPriceIncludesVat} size="small" />
+            <span style={{ fontSize: 13 }}>
+              {priceIncludesVat
+                ? <><b>Ввожу с НДС</b> — система сохранит нетто автоматически</>
+                : <>Ввожу без НДС</>}
+            </span>
+          </div>
+        )}
         <Form.Item name="routeId" label="Маршрут (опц., пусто = любой)"><RouteSelect style={{ width: '100%' }} /></Form.Item>
         <Form.Item name="vehicleTypeCode" label="Тип ТС" rules={[{ required: true }]}><VehicleTypeSelect style={{ width: '100%' }} /></Form.Item>
         <Space size="large" wrap>
-          <Form.Item name="pricePerTrip" label="₽/рейс (без НДС)"><InputNumber style={{ width: 150 }} min={0} /></Form.Item>
-          <Form.Item name="pricePerPallet" label="₽/паллета (без НДС)"><InputNumber style={{ width: 150 }} min={0} /></Form.Item>
-          <Form.Item name="pricePerKm" label="₽/км (без НДС)"><InputNumber style={{ width: 150 }} min={0} /></Form.Item>
+          <Form.Item name="pricePerTrip" label={priceIncludesVat ? '₽/рейс (с НДС)' : '₽/рейс (без НДС)'}>
+            <InputNumber style={{ width: 150 }} min={0} precision={2} step={100} />
+          </Form.Item>
+          <Form.Item name="pricePerPallet" label={priceIncludesVat ? '₽/паллета (с НДС)' : '₽/паллета (без НДС)'}>
+            <InputNumber style={{ width: 150 }} min={0} precision={2} step={100} />
+          </Form.Item>
+          <Form.Item name="pricePerKm" label={priceIncludesVat ? '₽/км (с НДС)' : '₽/км (без НДС)'}>
+            <InputNumber style={{ width: 150 }} min={0} precision={2} step={1} />
+          </Form.Item>
         </Space>
         <div style={{ marginBottom: 12, padding: '6px 10px', background: '#f6ffed', border: '1px solid #d9f7be', borderRadius: 6, fontSize: 13 }}>
-          Итоговая цена с НДС{vatRate ? ` ${vatRate}%` : ''}: ₽/рейс <b>{money(grossOf(pTrip, vatRate))}</b> · ₽/паллета <b>{money(grossOf(pPallet, vatRate))}</b> · ₽/км <b>{money(grossOf(pKm, vatRate))}</b>
+          {priceIncludesVat && vatRate > 0 ? (
+            <>Будет сохранено нетто: ₽/рейс <b>{money(toNet(pTrip))}</b> · ₽/паллета <b>{money(toNet(pPallet))}</b> · ₽/км <b>{money(toNet(pKm))}</b></>
+          ) : (
+            <>Итоговая цена с НДС{vatRate ? ` ${vatRate}%` : ''}: ₽/рейс <b>{money(grossOf(pTrip, vatRate))}</b> · ₽/паллета <b>{money(grossOf(pPallet, vatRate))}</b> · ₽/км <b>{money(grossOf(pKm, vatRate))}</b></>
+          )}
         </div>
         <Space size="large">
           <Form.Item name="validFrom" label="Действует с" rules={[{ required: true }]}><DatePicker format="DD.MM.YYYY" /></Form.Item>

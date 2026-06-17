@@ -13,6 +13,7 @@ const W_FIN: RoleName[] = ['LOGISTICS_MANAGER', 'LAAS_MANAGER', 'OWN_DISPATCHER'
 const reqInclude = {
   customer: true, payer: true, vertical: true, shipper: true, consignee: true,
   pickupLocation: true, deliveryLocation: true,
+  parent: { select: { id: true, requestNumber: true } },
 };
 const legInclude = { pickupLocation: true, dropoffLocation: true, tripCargoUnit: { include: { trip: true } } };
 const cargoInclude = { consignee: true, consigneeLocation: true, legs: { include: legInclude, orderBy: { legOrder: 'asc' as const } } };
