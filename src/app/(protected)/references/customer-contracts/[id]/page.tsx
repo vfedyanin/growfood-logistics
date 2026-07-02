@@ -174,28 +174,37 @@ export default function CustomerContractDetailPage() {
         </div>
         <div style={{ padding: 20 }}>
           {dates.length === 0 && <Text type="secondary">Тарифы не добавлены</Text>}
-          {dates.map((date, di) => (
+          {dates.map((date, di) => {
+            // Показываем только те VT-колонки, у которых есть данные в этой группе
+            const usedVtCodes = new Set<string>(
+              grouped[date].flatMap((t: any) => (t.tiers || []).map((tier: any) => tier.vehicleTypeCode))
+            );
+            const groupVtList = vtList.filter((vt: any) => usedVtCodes.has(vt.code));
+            const hasTripTariffs = groupVtList.length > 0;
+            return (
             <div key={date} style={{ marginBottom: di < dates.length - 1 ? 24 : 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                 <Tag color={di === 0 ? 'blue' : 'purple'} style={{ fontSize: 13, padding: '2px 10px' }}>с {date}</Tag>
                 <Text type="secondary" style={{ fontSize: 12 }}>{grouped[date].length} тариф(ов)</Text>
               </div>
-              <div style={{ overflowX: 'auto' }}>
+              <div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr>
-                      <th rowSpan={2} style={thL}>Откуда</th>
-                      <th rowSpan={2} style={thL}>Куда</th>
-                      <th rowSpan={2} style={th}>Тип</th>
-                      <th rowSpan={2} style={th}>По паллетам</th>
-                      <th colSpan={vtList.length} style={{ ...th, background: '#fffbe6', color: '#ad6800', borderColor: '#ffd591' }}>За рейс по типу ТС (нетто, ₽)</th>
-                      <th rowSpan={2} style={{ ...th, width: 70 }}>Действия</th>
+                      <th rowSpan={hasTripTariffs ? 2 : 1} style={thL}>Откуда</th>
+                      <th rowSpan={hasTripTariffs ? 2 : 1} style={thL}>Куда</th>
+                      <th rowSpan={hasTripTariffs ? 2 : 1} style={th}>Тип</th>
+                      <th rowSpan={hasTripTariffs ? 2 : 1} style={th}>По паллетам</th>
+                      {hasTripTariffs && <th colSpan={groupVtList.length} style={{ ...th, background: '#fffbe6', color: '#ad6800', borderColor: '#ffd591' }}>За рейс по типу ТС (нетто, ₽)</th>}
+                      <th rowSpan={hasTripTariffs ? 2 : 1} style={{ ...th, width: 70 }}>Действия</th>
                     </tr>
+                    {hasTripTariffs && (
                     <tr>
-                      {vtList.map(vt => (
+                      {groupVtList.map((vt: any) => (
                         <th key={vt.code} style={{ ...th, background: '#fffbe6', color: '#ad6800', borderColor: '#ffd591', whiteSpace: 'nowrap' }}>{vt.code}</th>
                       ))}
                     </tr>
+                    )}
                   </thead>
                   <tbody>
                     {grouped[date].map((t: any) => {
@@ -212,13 +221,13 @@ export default function CustomerContractDetailPage() {
                           </td>
                           <td style={td}>
                             {t.pricePerPallet != null
-                              ? <><span style={{ fontFamily: 'monospace' }}>{Number(t.pricePerPallet).toLocaleString('ru')} ₽</span><span style={{ color: '#aaa', fontSize: 10, marginLeft: 4 }}>нетто</span></>
+                              ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace' }}>{Number(t.pricePerPallet).toLocaleString('ru')} ₽</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
                               : <span style={{ color: '#ccc' }}>—</span>}
                           </td>
-                          {vtList.map(vt => (
+                          {groupVtList.map((vt: any) => (
                             <td key={vt.code} style={td}>
                               {tierMap[vt.code] != null
-                                ? <><span style={{ fontFamily: 'monospace' }}>{tierMap[vt.code].toLocaleString('ru')}</span><span style={{ color: '#aaa', fontSize: 10, marginLeft: 2 }}>нетто</span></>
+                                ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace' }}>{tierMap[vt.code].toLocaleString('ru')}</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
                                 : <span style={{ color: '#e0e0e0' }}>—</span>}
                             </td>
                           ))}
@@ -238,7 +247,8 @@ export default function CustomerContractDetailPage() {
               </div>
               {di < dates.length - 1 && <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 20 }} />}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
