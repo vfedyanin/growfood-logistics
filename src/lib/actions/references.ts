@@ -89,6 +89,45 @@ export async function getCustomerDeliveryLocations(customerId: string) {
   });
 }
 
+// Карта тарифов клиента для TariffPreview: locationId → { method, amount }
+// Смотрит в активные тарифы контрактов (CustomerContract → Tariff → Route.destinationId)
+export async function getCustomerTariffLocations(customerId: string) {
+  await requireAuth();
+  const date = new Date();
+  const contracts = await prisma.customerContract.findMany({
+    where: { OR: [{ customerId }, { members: { some: { customerId } } }] },
+    select: { id: true },
+  });
+  const contractIds = contracts.map((c) => c.id);
+  if (!contractIds.length) return [];
+
+  const tariffs = await prisma.tariff.findMany({
+    where: {
+      customerContractId: { in: contractIds },
+      validFrom: { lte: date },
+      OR: [{ validTo: null }, { validTo: { gte: date } }],
+    },
+    include: {
+      route: { select: { destinationId: true } },
+      tiers: { include: { vehicleType: { select: { capacityPallets: true } } } },
+    },
+    orderBy: { validFrom: 'desc' },
+  });
+
+  const seen = new Set<string>();
+  const result: { locationId: string; tariffMethod: string | null; tariffAmount: number; tiers: { capacityPallets: number; price: number }[] }[] = [];
+  for (const t of tariffs) {
+    if (!t.route?.destinationId || seen.has(t.route.destinationId)) continue;
+    seen.add(t.route.destinationId);
+    const amount = t.tariffType === 'PER_PALLET' ? Number(t.pricePerPallet ?? 0) : Number(t.pricePerTrip ?? 0);
+    const tiers = t.tiers
+      .filter((tier) => tier.vehicleType?.capacityPallets != null)
+      .map((tier) => ({ capacityPallets: tier.vehicleType!.capacityPallets!, price: Number(tier.price) }));
+    result.push({ locationId: t.route.destinationId, tariffMethod: t.tariffType, tariffAmount: amount, tiers });
+  }
+  return result;
+}
+
 export async function addCustomerDeliveryLocation(customerId: string, locationId: string, tariffMethod?: string, tariffAmount?: number) {
   await requirePermission(W);
   return prisma.customerDeliveryLocation.create({

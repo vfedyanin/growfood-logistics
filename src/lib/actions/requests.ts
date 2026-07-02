@@ -70,11 +70,61 @@ function cargoCreateData(c: any, actor: string | null) {
     legs: { create: (c.legs || []).map((l: any, i: number) => legCreateData(l, i + 1, actor)) },
   };
 }
-// Карта тарифов контрагента по точкам доставки: locationId → { method, amount }
-async function getCustomerTariffMap(customerId: string) {
+type TariffTierInfo = { capacityPallets: number; price: number };
+type TariffInfo = { method: string | null; amount: number; tiers: TariffTierInfo[] };
+
+// Для PER_TRIP с тирами: минимальная машина, вмещающая pallets паллет
+function getTariffPrice(t: TariffInfo, pallets: number): number {
+  if (t.method === 'PER_TRIP' && t.tiers.length > 0) {
+    const sorted = [...t.tiers].sort((a, b) => a.capacityPallets - b.capacityPallets);
+    const match = sorted.find((tier) => tier.capacityPallets >= pallets);
+    return match ? match.price : sorted[sorted.length - 1].price;
+  }
+  return t.amount;
+}
+
+// Карта тарифов контрагента по точкам доставки: locationId → TariffInfo
+// Смотрит в CustomerContract → Tariff → Route.destinationId (с учётом даты)
+async function getCustomerTariffMap(customerId: string, requestDate?: Date) {
+  const date = requestDate || new Date();
+  const map = new Map<string, TariffInfo>();
+
+  const contracts = await prisma.customerContract.findMany({
+    where: { OR: [{ customerId }, { members: { some: { customerId } } }] },
+    select: { id: true },
+  });
+  const contractIds = contracts.map((c) => c.id);
+
+  if (contractIds.length) {
+    const tariffs = await prisma.tariff.findMany({
+      where: {
+        customerContractId: { in: contractIds },
+        validFrom: { lte: date },
+        OR: [{ validTo: null }, { validTo: { gte: date } }],
+      },
+      include: {
+        route: { select: { destinationId: true } },
+        tiers: { include: { vehicleType: { select: { capacityPallets: true } } } },
+      },
+      orderBy: { validFrom: 'desc' },
+    });
+    for (const t of tariffs) {
+      if (!t.route?.destinationId) continue;
+      if (map.has(t.route.destinationId)) continue;
+      const amount = t.tariffType === 'PER_PALLET' ? num(t.pricePerPallet) : num(t.pricePerTrip);
+      const tiers: TariffTierInfo[] = t.tiers
+        .filter((tier) => tier.vehicleType?.capacityPallets != null)
+        .map((tier) => ({ capacityPallets: tier.vehicleType!.capacityPallets!, price: num(tier.price) }));
+      map.set(t.route.destinationId, { method: t.tariffType, amount, tiers });
+    }
+  }
+
+  // Резервный фолбэк: CustomerDeliveryLocation (legacy, сейчас пустая)
   const locs = await prisma.customerDeliveryLocation.findMany({ where: { customerId } });
-  const map = new Map<string, { method: string | null; amount: number }>();
-  for (const l of locs) map.set(l.locationId, { method: l.tariffMethod, amount: num(l.tariffAmount) });
+  for (const l of locs) {
+    if (!map.has(l.locationId)) map.set(l.locationId, { method: l.tariffMethod, amount: num(l.tariffAmount), tiers: [] });
+  }
+
   return map;
 }
 
@@ -87,10 +137,10 @@ async function recomputeRequestFinals(requestId: string) {
     include: { cargoes: { include: { legs: true } } },
   });
   if (!req) return;
-  const tariffs = await getCustomerTariffMap(req.customerId);
+  const tariffs = await getCustomerTariffMap(req.customerId, req.requestDate ?? undefined);
   const tariffOf = (c: any) => (c.consigneeLocationId ? tariffs.get(c.consigneeLocationId) : undefined);
   const perTripCargoes = req.cargoes.filter(
-    (c) => c.pricingMode === 'TARIFF' && tariffOf(c)?.method === 'PER_TRIP'
+    (c) => c.pricingMode === 'TARIFF' && tariffOf(c)?.method === 'PER_TRIP' && !(tariffOf(c)!.tiers.length > 0)
   );
   let perTripShare = 0;
   if (req.perTripScope === 'REQUEST' && perTripCargoes.length) {
@@ -104,7 +154,14 @@ async function recomputeRequestFinals(requestId: string) {
       const t = tariffOf(c);
       let base = 0;
       if (t?.method === 'PER_PALLET') base = num(t.amount) * num(c.pallets);
-      else if (t?.method === 'PER_TRIP') base = req.perTripScope === 'REQUEST' ? perTripShare : num(t.amount);
+      else if (t?.method === 'PER_TRIP') {
+        if (t.tiers.length > 0) {
+          // Тиры по вместимости ТС: выбираем минимальную машину под кол-во паллет
+          base = getTariffPrice(t, num(c.pallets));
+        } else {
+          base = req.perTripScope === 'REQUEST' ? perTripShare : num(t.amount);
+        }
+      }
       final = Math.max(0, base - num(c.discount));
     } else if (c.pricingMode === 'LEG') {
       final = c.legs.reduce((s, l) => s + num(l.finalCost), 0);
@@ -116,11 +173,12 @@ async function recomputeRequestFinals(requestId: string) {
 }
 
 // ============ List / Get ============
-export async function getRequests(filters?: { status?: RequestStatus; customerId?: string; dateFrom?: string; dateTo?: string }) {
+export async function getRequests(filters?: { status?: RequestStatus; customerId?: string; verticalCode?: string; dateFrom?: string; dateTo?: string }) {
   await requireAuth();
   const where: any = {};
   if (filters?.status) where.status = filters.status;
   if (filters?.customerId) where.customerId = filters.customerId;
+  if (filters?.verticalCode) where.verticalCode = filters.verticalCode;
   if (filters?.dateFrom || filters?.dateTo) {
     where.requestDate = {};
     if (filters.dateFrom) where.requestDate.gte = new Date(filters.dateFrom);
