@@ -341,7 +341,7 @@ export default function TripsPage() {
       </FilterBar>
 
       <DataTable title="Рейсы" data={data} columns={columns} loading={loading} scrollX={1100}
-        searchableKeys={['tripNumber']}
+        searchableKeys={['tripNumber', 'carrier.name', 'origin.name', 'destination.name']}
         toolbar={canWrite ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Создать рейс</Button> : undefined} />
 
       {/* ===== Создание / редактирование ===== */}

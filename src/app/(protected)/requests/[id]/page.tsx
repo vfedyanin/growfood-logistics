@@ -19,7 +19,7 @@ import {
   addRequestCargo, updateRequestCargo, removeRequestCargo,
   createInvoiceFromRequest, createTripFromRequest, createTripFromLeg, addCargoLegToTrip, unassignCargoLeg, getAssignableTripOptions,
 } from '@/lib/actions/requests';
-import { getCustomerDeliveryLocations } from '@/lib/actions/references';
+import { getCustomerTariffLocations } from '@/lib/actions/references';
 import { findGroupSiblings, linkGroupRequests, unlinkGroupRequest } from '@/lib/actions/contracts';
 
 const { Text } = Typography;
@@ -64,17 +64,29 @@ const fmt = (d: any) => (d ? dayjs(d).format('DD.MM.YYYY') : '—');
 const fmtt = (d: any) => (d ? dayjs(d).format('DD.MM HH:mm') : '—');
 const rub = (v: any) => (v != null ? Number(v).toLocaleString('ru') + ' ₽' : '—');
 
-function TariffPreview({ tariff, pallets, discount, scope }: { tariff?: { method: string | null; amount: number }; pallets: any; discount: any; scope: string }) {
+function getTieredPrice(tariff: { method: string | null; amount: number; tiers?: { capacityPallets: number; price: number }[] }, pallets: number): number {
+  if (tariff.method === 'PER_TRIP' && tariff.tiers && tariff.tiers.length > 0) {
+    const sorted = [...tariff.tiers].sort((a, b) => a.capacityPallets - b.capacityPallets);
+    const match = sorted.find((t) => t.capacityPallets >= pallets);
+    return match ? match.price : sorted[sorted.length - 1].price;
+  }
+  return tariff.amount;
+}
+
+function TariffPreview({ tariff, pallets, discount, scope }: { tariff?: { method: string | null; amount: number; tiers?: { capacityPallets: number; price: number }[] }; pallets: any; discount: any; scope: string }) {
   if (!tariff || !tariff.method)
     return <Text type="warning">Тариф для выбранной точки не задан.</Text>;
-  const amount = Number(tariff.amount) || 0;
-  const base = tariff.method === 'PER_PALLET' ? amount * (Number(pallets) || 0) : amount;
+  const numPallets = Number(pallets) || 0;
+  const amount = getTieredPrice(tariff, numPallets);
+  const hasTiers = tariff.method === 'PER_TRIP' && tariff.tiers && tariff.tiers.length > 0;
+  const base = tariff.method === 'PER_PALLET' ? amount * numPallets : amount;
   const final = Math.max(0, base - (Number(discount) || 0));
   const methodLabel = tariff.method === 'PER_PALLET' ? 'за паллету' : 'за рейс';
+  const vtLabel = hasTiers ? (() => { const sorted = [...tariff.tiers!].sort((a, b) => a.capacityPallets - b.capacityPallets); const match = sorted.find((t) => t.capacityPallets >= numPallets); return match ? ` (${numPallets} пал → ТС до ${match.capacityPallets} пал)` : ''; })() : '';
   return (
     <Text type="secondary">
-      Тариф: {amount.toLocaleString('ru')} ₽ {methodLabel}
-      {tariff.method === 'PER_PALLET' ? ` × ${Number(pallets) || 0} пал` : ''} = база {base.toLocaleString('ru')} ₽
+      Тариф: {amount.toLocaleString('ru')} ₽ {methodLabel}{vtLabel}
+      {tariff.method === 'PER_PALLET' ? ` × ${numPallets} пал` : ''} = база {base.toLocaleString('ru')} ₽
       {discount ? ` − ${Number(discount).toLocaleString('ru')} ₽ скидка` : ''} → итого {final.toLocaleString('ru')} ₽
     </Text>
   );
@@ -114,9 +126,9 @@ export default function RequestDetailPage() {
       const data = await getRequest(id);
       setReq(data);
       if (data?.customerId) {
-        const locs = await getCustomerDeliveryLocations(data.customerId);
-        const map: Record<string, { method: string | null; amount: number }> = {};
-        for (const l of locs as any[]) map[l.locationId] = { method: l.tariffMethod ?? null, amount: l.tariffAmount != null ? Number(l.tariffAmount) : 0 };
+        const locs = await getCustomerTariffLocations(data.customerId);
+        const map: Record<string, { method: string | null; amount: number; tiers: { capacityPallets: number; price: number }[] }> = {};
+        for (const l of locs as any[]) map[l.locationId] = { method: l.tariffMethod ?? null, amount: l.tariffAmount != null ? Number(l.tariffAmount) : 0, tiers: l.tiers ?? [] };
         setTariffMap(map);
       }
       const sibs = await findGroupSiblings(id);

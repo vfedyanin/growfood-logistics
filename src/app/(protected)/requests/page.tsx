@@ -21,7 +21,7 @@ import {
 import {
   getRequestTemplates, getRequestTemplate, createRequestTemplate, updateRequestTemplate, deleteRequestTemplate,
 } from '@/lib/actions/templates';
-import { getCustomerDeliveryLocations } from '@/lib/actions/references';
+import { getCustomerTariffLocations } from '@/lib/actions/references';
 
 const { Text } = Typography;
 
@@ -56,20 +56,32 @@ const fmtt = (d: any) => (d ? dayjs(d).format('DD.MM HH:mm') : '—');
 const rub = (v: any) => (v != null ? Number(v).toLocaleString('ru') + ' ₽' : '—');
 
 // Предпросчёт тарифной выручки за доставку груза в точку (авторитетный расчёт — на сервере).
-function TariffPreview({ tariff, pallets, discount, scope }: { tariff?: { method: string | null; amount: number }; pallets: any; discount: any; scope: string }) {
+function getTieredPrice(tariff: { method: string | null; amount: number; tiers?: { capacityPallets: number; price: number }[] }, pallets: number): number {
+  if (tariff.method === 'PER_TRIP' && tariff.tiers && tariff.tiers.length > 0) {
+    const sorted = [...tariff.tiers].sort((a, b) => a.capacityPallets - b.capacityPallets);
+    const match = sorted.find((t) => t.capacityPallets >= pallets);
+    return match ? match.price : sorted[sorted.length - 1].price;
+  }
+  return tariff.amount;
+}
+
+function TariffPreview({ tariff, pallets, discount, scope }: { tariff?: { method: string | null; amount: number; tiers?: { capacityPallets: number; price: number }[] }; pallets: any; discount: any; scope: string }) {
   const { Text: T } = Typography;
   if (!tariff || !tariff.method)
     return <T type="warning">Тариф для выбранной точки не задан — добавьте его в карточке контрагента (точки доставки).</T>;
-  const amount = Number(tariff.amount) || 0;
-  const base = tariff.method === 'PER_PALLET' ? amount * (Number(pallets) || 0) : amount;
+  const numPallets = Number(pallets) || 0;
+  const amount = getTieredPrice(tariff, numPallets);
+  const hasTiers = tariff.method === 'PER_TRIP' && tariff.tiers && tariff.tiers.length > 0;
+  const base = tariff.method === 'PER_PALLET' ? amount * numPallets : amount;
   const final = Math.max(0, base - (Number(discount) || 0));
   const methodLabel = tariff.method === 'PER_PALLET' ? 'за паллету' : 'за рейс';
+  const vtLabel = hasTiers ? (() => { const sorted = [...tariff.tiers!].sort((a, b) => a.capacityPallets - b.capacityPallets); const match = sorted.find((t) => t.capacityPallets >= numPallets); return match ? ` (${numPallets} пал → ТС до ${match.capacityPallets} пал)` : ''; })() : '';
   return (
     <T type="secondary">
-      Тариф: {amount.toLocaleString('ru')} ₽ {methodLabel}
-      {tariff.method === 'PER_PALLET' ? ` × ${Number(pallets) || 0} пал` : ''} = база {base.toLocaleString('ru')} ₽
+      Тариф: {amount.toLocaleString('ru')} ₽ {methodLabel}{vtLabel}
+      {tariff.method === 'PER_PALLET' ? ` × ${numPallets} пал` : ''} = база {base.toLocaleString('ru')} ₽
       {discount ? ` − ${Number(discount).toLocaleString('ru')} ₽ скидка` : ''} → итого {final.toLocaleString('ru')} ₽
-      {tariff.method === 'PER_TRIP' && scope === 'REQUEST' ? ' · фикс делится между PER_TRIP-грузами заявки при сохранении' : ''}
+      {tariff.method === 'PER_TRIP' && !hasTiers && scope === 'REQUEST' ? ' · фикс делится между PER_TRIP-грузами заявки при сохранении' : ''}
     </T>
   );
 }
@@ -152,6 +164,7 @@ export default function RequestsPage() {
 
   const [fStatus, setFStatus] = useState<string>();
   const [fCustomer, setFCustomer] = useState<string>();
+  const [fVertical, setFVertical] = useState<string>();
   const [fRange, setFRange] = useState<any>(null);
 
   // шаблоны
@@ -182,9 +195,9 @@ export default function RequestsPage() {
   const perTripScope = Form.useWatch('perTripScope', form) || 'CARGO';
   const loadTariffs = async (custId?: string) => {
     if (!custId) { setTariffMap({}); return; }
-    const locs = await getCustomerDeliveryLocations(custId);
-    const map: Record<string, { method: string | null; amount: number }> = {};
-    for (const l of locs as any[]) map[l.locationId] = { method: l.tariffMethod ?? null, amount: l.tariffAmount != null ? Number(l.tariffAmount) : 0 };
+    const locs = await getCustomerTariffLocations(custId);
+    const map: Record<string, { method: string | null; amount: number; tiers: { capacityPallets: number; price: number }[] }> = {};
+    for (const l of locs as any[]) map[l.locationId] = { method: l.tariffMethod ?? null, amount: l.tariffAmount != null ? Number(l.tariffAmount) : 0, tiers: l.tiers ?? [] };
     setTariffMap(map);
   };
 
@@ -203,12 +216,13 @@ export default function RequestsPage() {
       const filters: any = {};
       if (fStatus) filters.status = fStatus;
       if (fCustomer) filters.customerId = fCustomer;
+      if (fVertical) filters.verticalCode = fVertical;
       if (fRange?.[0]) filters.dateFrom = fRange[0].startOf('day').toISOString();
       if (fRange?.[1]) filters.dateTo = fRange[1].endOf('day').toISOString();
       setData(await getRequests(filters));
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [fStatus, fCustomer, fRange]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [fStatus, fCustomer, fVertical, fRange]);
   const loadTemplates = async () => setTemplates(await getRequestTemplates());
   useEffect(() => { loadTemplates(); }, []);
 
@@ -372,22 +386,21 @@ export default function RequestsPage() {
     const d: any = tpl?.data || {};
     form.setFieldsValue({
       ...d,
-      requestDate: d.requestDate ? dayjs(d.requestDate) : dayjs(),
+      requestDate: null,
+      requestedPallets: null,
       cargoes: (d.cargoes || []).map((c: any) => ({
         ...c,
-        legs: (c.legs || []).map((l: any) => {
-          const pickup = l.plannedPickupDate ? dayjs(l.plannedPickupDate) : null;
-          const dropoff = l.plannedDropoffDate ? dayjs(l.plannedDropoffDate) : null;
-          return {
-            ...l,
-            plannedPickupDate: pickup,
-            plannedPickupFrom: l.plannedPickupFrom ? dayjs(l.plannedPickupFrom) : pickup,
-            plannedPickupTo: l.plannedPickupTo ? dayjs(l.plannedPickupTo, 'HH:mm') : null,
-            plannedDropoffDate: dropoff,
-            plannedDropoffFrom: l.plannedDropoffFrom ? dayjs(l.plannedDropoffFrom) : dropoff,
-            plannedDropoffTo: l.plannedDropoffTo ? dayjs(l.plannedDropoffTo, 'HH:mm') : null,
-          };
-        }),
+        pallets: null,
+        weightKg: null,
+        legs: (c.legs || []).map((l: any) => ({
+          ...l,
+          plannedPickupDate: null,
+          plannedPickupFrom: l.plannedPickupFrom ? dayjs(l.plannedPickupFrom) : null,
+          plannedPickupTo: l.plannedPickupTo ? dayjs(l.plannedPickupTo, 'HH:mm') : null,
+          plannedDropoffDate: null,
+          plannedDropoffFrom: l.plannedDropoffFrom ? dayjs(l.plannedDropoffFrom) : null,
+          plannedDropoffTo: l.plannedDropoffTo ? dayjs(l.plannedDropoffTo, 'HH:mm') : null,
+        })),
       })),
     });
     message.success(`Форма заполнена из шаблона «${tpl?.name}»`);
@@ -420,9 +433,20 @@ export default function RequestsPage() {
   const columns = [
     { title: '№ заявки', dataIndex: 'requestNumber', key: 'requestNumber', width: 160 },
     { title: 'Заявитель', key: 'customer', render: (_: any, r: any) => r.customer?.name || '—' },
-    { title: 'Вертикаль', key: 'vert', render: (_: any, r: any) => r.vertical?.name || '—', responsive: ['lg'] as any },
-    { title: 'Дата', dataIndex: 'requestDate', key: 'date', render: fmt, responsive: ['lg'] as any },
-    { title: 'Грузов', key: 'cargoes', render: (_: any, r: any) => r.cargoes?.length || 0, width: 80 },
+    { title: 'Куда', key: 'dest', responsive: ['lg'] as any, render: (_: any, r: any) => {
+      if (r.deliveryLocation?.name) return r.deliveryLocation.name;
+      const locs = (r.cargoes || []).flatMap((c: any) => (c.legs || []).map((l: any) => l.dropoffLocation?.name)).filter(Boolean);
+      return locs[locs.length - 1] || '—';
+    } },
+    { title: 'Отправка', key: 'dateFrom', responsive: ['lg'] as any, render: (_: any, r: any) => {
+      const dates = (r.cargoes || []).flatMap((c: any) => (c.legs || []).map((l: any) => l.plannedPickup)).filter(Boolean).sort();
+      return dates.length ? fmt(dates[0]) : '—';
+    } },
+    { title: 'Доставка', key: 'dateTo', responsive: ['lg'] as any, render: (_: any, r: any) => {
+      const dates = (r.cargoes || []).flatMap((c: any) => (c.legs || []).map((l: any) => l.plannedDropoff)).filter(Boolean).sort();
+      return dates.length ? fmt(dates[dates.length - 1]) : '—';
+    } },
+    { title: 'Паллет', key: 'pallets', width: 80, render: (_: any, r: any) => { const t = (r.cargoes || []).reduce((s: number, c: any) => s + (c.pallets != null ? Number(c.pallets) : 0), 0); return t || '—'; } },
     { title: 'Сумма', key: 'sum', render: (_: any, r: any) => rub(reqSum(r)) },
     { title: 'Статус', dataIndex: 'status', key: 'status', render: (s: string) => <Tag color={statusCfg[s]?.color}>{statusCfg[s]?.label || s}</Tag> },
     {
@@ -491,14 +515,15 @@ export default function RequestsPage() {
 
   return (
     <>
-      <FilterBar onReset={() => { setFStatus(undefined); setFCustomer(undefined); setFRange(null); }}>
+      <FilterBar onReset={() => { setFStatus(undefined); setFCustomer(undefined); setFVertical(undefined); setFRange(null); }}>
         <Select placeholder="Статус" allowClear style={{ width: 170 }} value={fStatus} onChange={setFStatus} options={Object.entries(statusCfg).map(([v, c]) => ({ value: v, label: c.label }))} />
         <CustomerSelect placeholder="Заявитель" style={{ width: 200 }} value={fCustomer} onChange={setFCustomer} />
+        <VerticalSelect placeholder="Вертикаль" style={{ width: 180 }} value={fVertical} onChange={setFVertical} />
         <DatePicker.RangePicker value={fRange} onChange={setFRange} format="DD.MM.YYYY" />
       </FilterBar>
 
       <DataTable title="Заявки на перевозку" data={data} columns={columns} loading={loading} scrollX={1100}
-        searchableKeys={['requestNumber']}
+        searchableKeys={['requestNumber', 'customer.name']}
         toolbar={canWrite ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Создать заявку</Button> : undefined} />
 
       {/* ===== Создание / редактирование ===== */}

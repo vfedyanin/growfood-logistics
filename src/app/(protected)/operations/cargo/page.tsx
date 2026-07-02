@@ -107,7 +107,8 @@ export default function CargoPage() {
         <DatePicker.RangePicker value={fPickup} onChange={setFPickup} format="DD.MM.YYYY" placeholder={['Забор с', 'Забор по']} />
       </FilterBar>
 
-      <DataTable title="Груз (плечи маршрута)" data={data} columns={columns} loading={loading} scrollX={1000} rowKey="id" />
+      <DataTable title="Груз (плечи маршрута)" data={data} columns={columns} loading={loading} scrollX={1000} rowKey="id"
+        searchableKeys={['cargo.request.requestNumber', 'cargo.request.customer.name', 'pickupLocation.name', 'dropoffLocation.name']} />
 
       {/* Привязка плеча к рейсу */}
       <Modal open={assignOpen} title="Привязать плечо к рейсу" onOk={submitAssign} onCancel={() => setAssignOpen(false)} okText="Привязать" cancelText="Отмена">
