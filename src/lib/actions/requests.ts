@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { serialize } from '@/lib/serialize';
 import { requireAuth, requireRole, getActorId, RoleName } from '@/lib/authz';
 import { revalidatePath } from 'next/cache';
+import { TariffInfo, toTariffInfo, tariffPrice } from '@/lib/tariff';
 
 type RequestStatus = 'NEW' | 'CONFIRMED' | 'IN_PLANNING' | 'IN_TRANSIT' | 'DELIVERED' | 'CANCELLED';
 
@@ -70,19 +71,6 @@ function cargoCreateData(c: any, actor: string | null) {
     legs: { create: (c.legs || []).map((l: any, i: number) => legCreateData(l, i + 1, actor)) },
   };
 }
-type TariffTierInfo = { capacityPallets: number; price: number };
-type TariffInfo = { method: string | null; amount: number; tiers: TariffTierInfo[] };
-
-// Для PER_TRIP с тирами: минимальная машина, вмещающая pallets паллет
-function getTariffPrice(t: TariffInfo, pallets: number): number {
-  if (t.method === 'PER_TRIP' && t.tiers.length > 0) {
-    const sorted = [...t.tiers].sort((a, b) => a.capacityPallets - b.capacityPallets);
-    const match = sorted.find((tier) => tier.capacityPallets >= pallets);
-    return match ? match.price : sorted[sorted.length - 1].price;
-  }
-  return t.amount;
-}
-
 // Карта тарифов контрагента по точкам доставки: locationId → TariffInfo
 // Смотрит в CustomerContract → Tariff → Route.destinationId (с учётом даты)
 async function getCustomerTariffMap(customerId: string, requestDate?: Date) {
@@ -111,11 +99,7 @@ async function getCustomerTariffMap(customerId: string, requestDate?: Date) {
     for (const t of tariffs) {
       if (!t.route?.destinationId) continue;
       if (map.has(t.route.destinationId)) continue;
-      const amount = t.tariffType === 'PER_PALLET' ? num(t.pricePerPallet) : num(t.pricePerTrip);
-      const tiers: TariffTierInfo[] = t.tiers
-        .filter((tier) => tier.vehicleType?.capacityPallets != null)
-        .map((tier) => ({ capacityPallets: tier.vehicleType!.capacityPallets!, price: num(tier.price) }));
-      map.set(t.route.destinationId, { method: t.tariffType, amount, tiers });
+      map.set(t.route.destinationId, toTariffInfo(t));
     }
   }
 
@@ -153,14 +137,11 @@ async function recomputeRequestFinals(requestId: string) {
     if (c.pricingMode === 'TARIFF') {
       const t = tariffOf(c);
       let base = 0;
-      if (t?.method === 'PER_PALLET') base = num(t.amount) * num(c.pallets);
+      if (t?.method === 'PER_PALLET') base = tariffPrice(t, num(c.pallets));
       else if (t?.method === 'PER_TRIP') {
-        if (t.tiers.length > 0) {
-          // Тиры по вместимости ТС: выбираем минимальную машину под кол-во паллет
-          base = getTariffPrice(t, num(c.pallets));
-        } else {
-          base = req.perTripScope === 'REQUEST' ? perTripShare : num(t.amount);
-        }
+        // PER_TRIP с тирами — цена по вместимости ТС; без тиров — фикс (или доля при scope=REQUEST)
+        if (t.tiers.length > 0) base = tariffPrice(t, num(c.pallets));
+        else base = req.perTripScope === 'REQUEST' ? perTripShare : num(t.amount);
       }
       final = Math.max(0, base - num(c.discount));
     } else if (c.pricingMode === 'LEG') {
