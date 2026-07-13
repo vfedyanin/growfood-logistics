@@ -160,8 +160,8 @@ async function main() {
 
   // ============ Routes ============
   const routesData = [
-    { code: 'KLP-SPB', name: 'Колпино → СПб', originId: loc['KOLPINO'].id, destinationId: loc['SPB_DC'].id, distanceKm: 35, estimatedHours: 1.5, routeType: 'DIRECT' as const },
-    { code: 'KLP-MSK', name: 'Колпино → Москва', originId: loc['KOLPINO'].id, destinationId: loc['MSK_DC'].id, distanceKm: 720, estimatedHours: 12, routeType: 'DIRECT' as const },
+    { code: 'KLP-SPB', name: 'Колпино → СПб', originId: loc['KOLPINO'].id, destinationId: loc['SPB_DC'].id, distanceKm: 35 },
+    { code: 'KLP-MSK', name: 'Колпино → Москва', originId: loc['KOLPINO'].id, destinationId: loc['MSK_DC'].id, distanceKm: 720 },
   ];
   const rt: Record<string, any> = {};
   for (const r of routesData) {
