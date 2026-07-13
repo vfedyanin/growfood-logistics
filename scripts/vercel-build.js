@@ -4,6 +4,7 @@
 const { execSync } = require('child_process');
 const run = (cmd) => execSync(cmd, { stdio: 'inherit' });
 
+run('prisma generate');
 run('prisma migrate deploy');
 
 if (process.env.VERCEL_ENV === 'preview') {

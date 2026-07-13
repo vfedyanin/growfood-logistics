@@ -27,21 +27,21 @@ const CONTRACT_TYPE_LABELS: Record<string, string> = {
 const fmt = (d: any) => (d ? dayjs(d).format('DD.MM.YYYY') : '—');
 
 interface TariffEntry { validFrom: string; tariff: any }
-interface RouteData { direction: any; entries: TariffEntry[] }
+interface RouteData { originLocation: any; destinationLocation: any; entries: TariffEntry[] }
 
-function groupByDirection(tariffs: any[]): RouteData[] {
-  const byDir = new Map<string, { direction: any; byDate: Map<string, any> }>();
+function groupByLocations(tariffs: any[]): RouteData[] {
+  const byKey = new Map<string, { originLocation: any; destinationLocation: any; byDate: Map<string, any> }>();
   for (const t of tariffs) {
-    const rk = t.directionId || '__no_dir__';
-    if (!byDir.has(rk)) byDir.set(rk, { direction: t.direction, byDate: new Map() });
-    const entry = byDir.get(rk)!;
+    const rk = `${t.originLocationId || '__'}_${t.destinationLocationId || '__'}`;
+    if (!byKey.has(rk)) byKey.set(rk, { originLocation: t.originLocation, destinationLocation: t.destinationLocation, byDate: new Map() });
+    const entry = byKey.get(rk)!;
     const dk = dayjs(t.validFrom).format('YYYY-MM-DD');
     if (!entry.byDate.has(dk)) entry.byDate.set(dk, t);
   }
   const result: RouteData[] = [];
-  for (const [, { direction, byDate }] of Array.from(byDir)) {
+  for (const [, { originLocation, destinationLocation, byDate }] of Array.from(byKey)) {
     const sortedDates = Array.from(byDate.keys()).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-    result.push({ direction, entries: sortedDates.map(d => ({ validFrom: d, tariff: byDate.get(d) })) });
+    result.push({ originLocation, destinationLocation, entries: sortedDates.map(d => ({ validFrom: d, tariff: byDate.get(d) })) });
   }
   return result;
 }
@@ -91,8 +91,8 @@ export default function CustomerContractDetailPage() {
     const tierMap: any = {};
     t.tiers?.forEach((tier: any) => { tierMap[`tier_${tier.vehicleTypeCode}`] = Number(tier.price); });
     form.setFieldsValue({
-      originId: t.direction?.originId ?? null,
-      destinationId: t.direction?.destinationId ?? null,
+      originId: t.originLocationId ?? null,
+      destinationId: t.destinationLocationId ?? null,
       tariffType: t.tariffType,
       validFrom: dayjs(t.validFrom),
       pricePerPallet: t.pricePerPallet != null ? Number(t.pricePerPallet) : undefined,
@@ -152,7 +152,7 @@ export default function CustomerContractDetailPage() {
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><Spin size="large" /></div>;
   if (!contract) return <div style={{ padding: 40 }}>Договор не найден</div>;
 
-  const routeData = groupByDirection(contract.tariffs || []);
+  const routeData = groupByLocations(contract.tariffs || []);
   const currentItems = routeData.map(rd => ({ entry: rd.entries[0] }));
   const historicalItems = routeData.flatMap(rd =>
     rd.entries.slice(1).map((entry, idx) => ({
@@ -227,8 +227,8 @@ export default function CustomerContractDetailPage() {
                   return (
                     <tr key={t.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                       <td style={tdL}><Tag color="blue" style={{ fontSize: 11 }}>{dayjs(entry.validFrom).format('DD.MM.YYYY')}</Tag></td>
-                      <td style={tdL}>{t.direction?.origin?.name || '—'}</td>
-                      <td style={tdL}>{t.direction?.destination?.name || '—'}</td>
+                      <td style={tdL}>{t.originLocation?.name || '—'}</td>
+                      <td style={tdL}>{t.destinationLocation?.name || '—'}</td>
                       <td style={td}>
                         <Tag color={t.tariffType === 'PER_PALLET' ? 'purple' : 'blue'} style={{ fontSize: 11 }}>
                           {t.tariffType === 'PER_PALLET' ? 'паллет' : 'рейс'}
@@ -302,8 +302,8 @@ export default function CustomerContractDetailPage() {
                         <tr key={t.id + entry.validFrom} style={{ borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
                           <td style={{ ...tdL, color: '#888' }}>{dayjs(entry.validFrom).format('DD.MM.YYYY')}</td>
                           <td style={{ ...tdL, color: '#888' }}>{validTo}</td>
-                          <td style={{ ...tdL, color: '#888' }}>{t.direction?.origin?.name || '—'}</td>
-                          <td style={{ ...tdL, color: '#888' }}>{t.direction?.destination?.name || '—'}</td>
+                          <td style={{ ...tdL, color: '#888' }}>{t.originLocation?.name || '—'}</td>
+                          <td style={{ ...tdL, color: '#888' }}>{t.destinationLocation?.name || '—'}</td>
                           <td style={td}>
                             <Tag color={t.tariffType === 'PER_PALLET' ? 'purple' : 'blue'} style={{ fontSize: 11, opacity: 0.6 }}>
                               {t.tariffType === 'PER_PALLET' ? 'паллет' : 'рейс'}

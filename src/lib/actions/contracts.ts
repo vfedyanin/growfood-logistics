@@ -152,7 +152,8 @@ export async function getCustomerContractDetail(id: string) {
       members: { include: { customer: true } },
       tariffs: {
         include: {
-          direction: directionWithLocations,
+          originLocation: true,
+          destinationLocation: true,
           tiers: { orderBy: { vehicleTypeCode: 'asc' } },
         },
         orderBy: { validFrom: 'desc' },
@@ -178,12 +179,11 @@ export async function createContractTariff(contractId: string, data: {
   await requirePermission(W);
   const actor = await getActorId();
   const toNet = (v: number) => data.vatRatePct > 0 ? Math.round(v / (1 + data.vatRatePct / 100) * 100) / 100 : v;
-  let directionId: string | null = null;
-  if (data.originId && data.destinationId) directionId = await findOrCreateDirection(data.originId, data.destinationId);
   const r = await prisma.tariff.create({
     data: {
       customerContractId: contractId,
-      directionId,
+      originLocationId: data.originId ?? null,
+      destinationLocationId: data.destinationId ?? null,
       tariffType: data.tariffType,
       validFrom: new Date(data.validFrom),
       pricePerPallet: data.tariffType === 'PER_PALLET' && data.pricePerPallet != null ? toNet(data.pricePerPallet) : null,
@@ -210,13 +210,12 @@ export async function updateContractTariff(tariffId: string, contractId: string,
   if (!dateChanged) {
     const actor = await getActorId();
     const toNet = (v: number) => data.vatRatePct > 0 ? Math.round(v / (1 + data.vatRatePct / 100) * 100) / 100 : v;
-    let directionId: string | null = null;
-    if (data.originId && data.destinationId) directionId = await findOrCreateDirection(data.originId, data.destinationId);
     await prisma.tariffTier.deleteMany({ where: { tariffId } });
     await prisma.tariff.update({
       where: { id: tariffId },
       data: {
-        directionId,
+        originLocationId: data.originId ?? null,
+        destinationLocationId: data.destinationId ?? null,
         tariffType: data.tariffType,
         validFrom: new Date(data.validFrom),
         pricePerPallet: data.tariffType === 'PER_PALLET' && data.pricePerPallet != null ? toNet(data.pricePerPallet) : null,
