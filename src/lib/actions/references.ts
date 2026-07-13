@@ -89,43 +89,11 @@ export async function getCustomerDeliveryLocations(customerId: string) {
   });
 }
 
-// Карта тарифов клиента для TariffPreview: locationId → { method, amount }
-// Смотрит в активные тарифы контрактов (CustomerContract → Tariff → Route.destinationId)
-export async function getCustomerTariffLocations(customerId: string) {
+// TariffPreview: возвращает пустой список — Direction больше не содержит destinationId,
+// определение точки доставки по направлению будет реализовано отдельно (ARCH_BACKLOG)
+export async function getCustomerTariffLocations(_customerId: string) {
   await requireAuth();
-  const date = new Date();
-  const contracts = await prisma.customerContract.findMany({
-    where: { OR: [{ customerId }, { members: { some: { customerId } } }] },
-    select: { id: true },
-  });
-  const contractIds = contracts.map((c) => c.id);
-  if (!contractIds.length) return [];
-
-  const tariffs = await prisma.tariff.findMany({
-    where: {
-      customerContractId: { in: contractIds },
-      validFrom: { lte: date },
-      OR: [{ validTo: null }, { validTo: { gte: date } }],
-    },
-    include: {
-      route: { select: { destinationId: true } },
-      tiers: { include: { vehicleType: { select: { capacityPallets: true } } } },
-    },
-    orderBy: { validFrom: 'desc' },
-  });
-
-  const seen = new Set<string>();
-  const result: { locationId: string; tariffMethod: string | null; tariffAmount: number; tiers: { capacityPallets: number; price: number }[] }[] = [];
-  for (const t of tariffs) {
-    if (!t.route?.destinationId || seen.has(t.route.destinationId)) continue;
-    seen.add(t.route.destinationId);
-    const amount = t.tariffType === 'PER_PALLET' ? Number(t.pricePerPallet ?? 0) : Number(t.pricePerTrip ?? 0);
-    const tiers = t.tiers
-      .filter((tier) => tier.vehicleType?.capacityPallets != null)
-      .map((tier) => ({ capacityPallets: tier.vehicleType!.capacityPallets!, price: Number(tier.price) }));
-    result.push({ locationId: t.route.destinationId, tariffMethod: t.tariffType, tariffAmount: amount, tiers });
-  }
-  return result;
+  return [];
 }
 
 export async function addCustomerDeliveryLocation(customerId: string, locationId: string, tariffMethod?: string, tariffAmount?: number) {
@@ -269,29 +237,29 @@ export async function deleteDriver(id: string) {
   revalidatePath('/references/drivers');
 }
 
-// ============ Routes ============
-export async function getRoutes() {
+// ============ Directions ============
+export async function getDirections() {
   await requireAuth();
-  return serialize(await prisma.route.findMany({ include: { origin: true, destination: true }, orderBy: { code: 'asc' } }));
+  return serialize(await prisma.direction.findMany({ orderBy: { code: 'asc' } }));
 }
-export async function createRoute(data: any) {
+export async function createDirection(data: any) {
   await requirePermission(W);
   const actor = await getActorId();
-  const r = await prisma.route.create({ data: { ...data, createdById: actor, updatedById: actor } });
-  revalidatePath('/references/routes');
+  const r = await prisma.direction.create({ data: { ...data, createdById: actor, updatedById: actor } });
+  revalidatePath('/references/directions');
   return r;
 }
-export async function updateRoute(id: string, data: any) {
+export async function updateDirection(id: string, data: any) {
   await requirePermission(W);
   const actor = await getActorId();
-  const r = await prisma.route.update({ where: { id }, data: { ...data, updatedById: actor } });
-  revalidatePath('/references/routes');
+  const r = await prisma.direction.update({ where: { id }, data: { ...data, updatedById: actor } });
+  revalidatePath('/references/directions');
   return r;
 }
-export async function deleteRoute(id: string) {
+export async function deleteDirection(id: string) {
   await requirePermission(W);
-  await prisma.route.delete({ where: { id } });
-  revalidatePath('/references/routes');
+  await prisma.direction.delete({ where: { id } });
+  revalidatePath('/references/directions');
 }
 
 // ============ Option-getters для селектов ============
@@ -336,8 +304,8 @@ export async function getDriverOptions() {
   const rows = await prisma.driver.findMany({ where: { isActive: true }, orderBy: { fullName: 'asc' } });
   return rows.map((d) => ({ value: d.id, label: d.fullName }));
 }
-export async function getRouteOptions() {
+export async function getDirectionOptions() {
   await requireAuth();
-  const rows = await prisma.route.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } });
+  const rows = await prisma.direction.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } });
   return rows.map((r) => ({ value: r.id, label: r.name ? `${r.code} — ${r.name}` : r.code }));
 }

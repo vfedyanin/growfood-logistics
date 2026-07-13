@@ -6,7 +6,7 @@ import {
   Button, Form, Input, DatePicker, Select, Space, Popconfirm, Tag, message,
   Descriptions, Typography, Spin, InputNumber, Switch, Modal,
 } from 'antd';
-import { ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, HistoryOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { LocationSelect, CustomerSelect } from '@/components/selects/EntitySelects';
 import { getVehicleTypes } from '@/lib/actions/references';
@@ -26,13 +26,24 @@ const CONTRACT_TYPE_LABELS: Record<string, string> = {
 
 const fmt = (d: any) => (d ? dayjs(d).format('DD.MM.YYYY') : '—');
 
-function groupByDate(tariffs: any[]): Record<string, any[]> {
-  return tariffs.reduce((acc: any, t: any) => {
-    const key = dayjs(t.validFrom).format('DD.MM.YYYY');
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(t);
-    return acc;
-  }, {});
+interface TariffEntry { validFrom: string; tariff: any }
+interface RouteData { direction: any; entries: TariffEntry[] }
+
+function groupByDirection(tariffs: any[]): RouteData[] {
+  const byDir = new Map<string, { direction: any; byDate: Map<string, any> }>();
+  for (const t of tariffs) {
+    const rk = t.directionId || '__no_dir__';
+    if (!byDir.has(rk)) byDir.set(rk, { direction: t.direction, byDate: new Map() });
+    const entry = byDir.get(rk)!;
+    const dk = dayjs(t.validFrom).format('YYYY-MM-DD');
+    if (!entry.byDate.has(dk)) entry.byDate.set(dk, t);
+  }
+  const result: RouteData[] = [];
+  for (const [, { direction, byDate }] of byDir) {
+    const sortedDates = [...byDate.keys()].sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    result.push({ direction, entries: sortedDates.map(d => ({ validFrom: d, tariff: byDate.get(d) })) });
+  }
+  return result;
 }
 
 export default function CustomerContractDetailPage() {
@@ -48,6 +59,7 @@ export default function CustomerContractDetailPage() {
   const [newMemberId, setNewMemberId] = useState<string | undefined>(undefined);
   const [priceIncludesVat, setPriceIncludesVat] = useState(false);
   const [tariffType, setTariffType] = useState<'PER_PALLET' | 'PER_TRIP'>('PER_PALLET');
+  const [showHistory, setShowHistory] = useState(false);
   const [form] = Form.useForm();
 
   const refresh = useCallback(async () => {
@@ -55,7 +67,7 @@ export default function CustomerContractDetailPage() {
     try {
       const [c, vt] = await Promise.all([getCustomerContractDetail(id), getVehicleTypes()]);
       setContract(c);
-      setVtList(vt);
+      setVtList([...vt].sort((a: any, b: any) => parseInt(a.code.replace('VT-', '')) - parseInt(b.code.replace('VT-', ''))));
       setNotesValue(c?.notes || '');
     } finally { setLoading(false); }
   }, [id]);
@@ -79,8 +91,8 @@ export default function CustomerContractDetailPage() {
     const tierMap: any = {};
     t.tiers?.forEach((tier: any) => { tierMap[`tier_${tier.vehicleTypeCode}`] = Number(tier.price); });
     form.setFieldsValue({
-      originId: t.route?.originId,
-      destinationId: t.route?.destinationId,
+      originId: t.direction?.originId ?? null,
+      destinationId: t.direction?.destinationId ?? null,
       tariffType: t.tariffType,
       validFrom: dayjs(t.validFrom),
       pricePerPallet: t.pricePerPallet != null ? Number(t.pricePerPallet) : undefined,
@@ -99,8 +111,8 @@ export default function CustomerContractDetailPage() {
       .map(t => ({ ...t, price: Number(t.price) }));
 
     const payload = {
-      originId: v.originId,
-      destinationId: v.destinationId,
+      originId: v.originId ?? null,
+      destinationId: v.destinationId ?? null,
       tariffType: v.tariffType,
       validFrom: v.validFrom.format('YYYY-MM-DD'),
       pricePerPallet: v.tariffType === 'PER_PALLET' ? v.pricePerPallet : null,
@@ -140,8 +152,21 @@ export default function CustomerContractDetailPage() {
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><Spin size="large" /></div>;
   if (!contract) return <div style={{ padding: 40 }}>Договор не найден</div>;
 
-  const grouped = groupByDate(contract.tariffs || []);
-  const dates = Object.keys(grouped).sort((a, b) => dayjs(b, 'DD.MM.YYYY').valueOf() - dayjs(a, 'DD.MM.YYYY').valueOf());
+  const routeData = groupByDirection(contract.tariffs || []);
+  const currentItems = routeData.map(rd => ({ entry: rd.entries[0] }));
+  const historicalItems = routeData.flatMap(rd =>
+    rd.entries.slice(1).map((entry, idx) => ({
+      entry,
+      supersededByDate: rd.entries[idx].validFrom,
+    }))
+  );
+
+  const allVtCodes = new Set<string>();
+  (contract.tariffs || []).forEach((t: any) =>
+    (t.tiers || []).forEach((tier: any) => allVtCodes.add(tier.vehicleTypeCode))
+  );
+  const displayVtList = vtList.filter((vt: any) => allVtCodes.has(vt.code));
+  const hasTripTariffs = displayVtList.length > 0;
 
   return (
     <div style={{ maxWidth: 1300, margin: '0 auto', padding: '0 16px 40px' }}>
@@ -173,82 +198,137 @@ export default function CustomerContractDetailPage() {
           <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>Добавить тариф</Button>
         </div>
         <div style={{ padding: 20 }}>
-          {dates.length === 0 && <Text type="secondary">Тарифы не добавлены</Text>}
-          {dates.map((date, di) => {
-            // Показываем только те VT-колонки, у которых есть данные в этой группе
-            const usedVtCodes = new Set<string>(
-              grouped[date].flatMap((t: any) => (t.tiers || []).map((tier: any) => tier.vehicleTypeCode))
-            );
-            const groupVtList = vtList.filter((vt: any) => usedVtCodes.has(vt.code));
-            const hasTripTariffs = groupVtList.length > 0;
-            return (
-            <div key={date} style={{ marginBottom: di < dates.length - 1 ? 24 : 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <Tag color={di === 0 ? 'blue' : 'purple'} style={{ fontSize: 13, padding: '2px 10px' }}>с {date}</Tag>
-                <Text type="secondary" style={{ fontSize: 12 }}>{grouped[date].length} тариф(ов)</Text>
-              </div>
-              <div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          {currentItems.length === 0 && <Text type="secondary">Тарифы не добавлены</Text>}
+          {currentItems.length > 0 && (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th rowSpan={hasTripTariffs ? 2 : 1} style={thL}>Дата с</th>
+                  <th rowSpan={hasTripTariffs ? 2 : 1} style={thL}>Откуда</th>
+                  <th rowSpan={hasTripTariffs ? 2 : 1} style={thL}>Куда</th>
+                  <th rowSpan={hasTripTariffs ? 2 : 1} style={th}>Тип</th>
+                  <th rowSpan={hasTripTariffs ? 2 : 1} style={th}>По паллетам</th>
+                  {hasTripTariffs && <th colSpan={displayVtList.length} style={{ ...th, background: '#fffbe6', color: '#ad6800', borderColor: '#ffd591' }}>За рейс по типу ТС (нетто, ₽)</th>}
+                  <th rowSpan={hasTripTariffs ? 2 : 1} style={{ ...th, width: 70 }}>Действия</th>
+                </tr>
+                {hasTripTariffs && (
+                  <tr>
+                    {displayVtList.map((vt: any) => (
+                      <th key={vt.code} style={{ ...th, background: '#fffbe6', color: '#ad6800', borderColor: '#ffd591', whiteSpace: 'nowrap' }}>{vt.code}</th>
+                    ))}
+                  </tr>
+                )}
+              </thead>
+              <tbody>
+                {currentItems.map(({ entry }) => {
+                  const t = entry.tariff;
+                  const tierMap: Record<string, number> = {};
+                  t.tiers?.forEach((tier: any) => { tierMap[tier.vehicleTypeCode] = Number(tier.price); });
+                  return (
+                    <tr key={t.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                      <td style={tdL}><Tag color="blue" style={{ fontSize: 11 }}>{dayjs(entry.validFrom).format('DD.MM.YYYY')}</Tag></td>
+                      <td style={tdL}>{t.direction?.origin?.name || '—'}</td>
+                      <td style={tdL}>{t.direction?.destination?.name || '—'}</td>
+                      <td style={td}>
+                        <Tag color={t.tariffType === 'PER_PALLET' ? 'purple' : 'blue'} style={{ fontSize: 11 }}>
+                          {t.tariffType === 'PER_PALLET' ? 'паллет' : 'рейс'}
+                        </Tag>
+                      </td>
+                      <td style={td}>
+                        {t.pricePerPallet != null
+                          ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace' }}>{Number(t.pricePerPallet).toLocaleString('ru')} ₽</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
+                          : <span style={{ color: '#ccc' }}>—</span>}
+                      </td>
+                      {displayVtList.map((vt: any) => (
+                        <td key={vt.code} style={td}>
+                          {tierMap[vt.code] != null
+                            ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace' }}>{tierMap[vt.code].toLocaleString('ru')}</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
+                            : <span style={{ color: '#e0e0e0' }}>—</span>}
+                        </td>
+                      ))}
+                      <td style={td}>
+                        <Space size={0}>
+                          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(t)} />
+                          <Popconfirm title="Удалить тариф?" onConfirm={() => onDeleteTariff(t.id)}>
+                            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+                          </Popconfirm>
+                        </Space>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+          {historicalItems.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <Button
+                type="link"
+                size="small"
+                icon={<HistoryOutlined />}
+                onClick={() => setShowHistory(v => !v)}
+                style={{ paddingLeft: 0, color: '#888' }}
+              >
+                {showHistory ? 'Скрыть историю тарифов' : `Показать историю тарифов (${historicalItems.length})`}
+              </Button>
+              {showHistory && (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 8 }}>
                   <thead>
                     <tr>
+                      <th rowSpan={hasTripTariffs ? 2 : 1} style={{ ...thL, color: '#531dab' }}>Дата с</th>
+                      <th rowSpan={hasTripTariffs ? 2 : 1} style={{ ...thL, color: '#531dab' }}>Дата по</th>
                       <th rowSpan={hasTripTariffs ? 2 : 1} style={thL}>Откуда</th>
                       <th rowSpan={hasTripTariffs ? 2 : 1} style={thL}>Куда</th>
                       <th rowSpan={hasTripTariffs ? 2 : 1} style={th}>Тип</th>
                       <th rowSpan={hasTripTariffs ? 2 : 1} style={th}>По паллетам</th>
-                      {hasTripTariffs && <th colSpan={groupVtList.length} style={{ ...th, background: '#fffbe6', color: '#ad6800', borderColor: '#ffd591' }}>За рейс по типу ТС (нетто, ₽)</th>}
-                      <th rowSpan={hasTripTariffs ? 2 : 1} style={{ ...th, width: 70 }}>Действия</th>
+                      {hasTripTariffs && <th colSpan={displayVtList.length} style={{ ...th, background: '#fffbe6', color: '#ad6800', borderColor: '#ffd591' }}>За рейс по типу ТС (нетто, ₽)</th>}
                     </tr>
                     {hasTripTariffs && (
-                    <tr>
-                      {groupVtList.map((vt: any) => (
-                        <th key={vt.code} style={{ ...th, background: '#fffbe6', color: '#ad6800', borderColor: '#ffd591', whiteSpace: 'nowrap' }}>{vt.code}</th>
-                      ))}
-                    </tr>
+                      <tr>
+                        {displayVtList.map((vt: any) => (
+                          <th key={vt.code} style={{ ...th, background: '#fffbe6', color: '#ad6800', borderColor: '#ffd591', whiteSpace: 'nowrap' }}>{vt.code}</th>
+                        ))}
+                      </tr>
                     )}
                   </thead>
                   <tbody>
-                    {grouped[date].map((t: any) => {
+                    {historicalItems.map(({ entry, supersededByDate }) => {
+                      const t = entry.tariff;
+                      const validTo = dayjs(supersededByDate).subtract(1, 'day').format('DD.MM.YYYY');
                       const tierMap: Record<string, number> = {};
                       t.tiers?.forEach((tier: any) => { tierMap[tier.vehicleTypeCode] = Number(tier.price); });
                       return (
-                        <tr key={t.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                          <td style={tdL}>{t.route?.origin?.name || '—'}</td>
-                          <td style={tdL}>{t.route?.destination?.name || '—'}</td>
+                        <tr key={t.id + entry.validFrom} style={{ borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
+                          <td style={{ ...tdL, color: '#888' }}>{dayjs(entry.validFrom).format('DD.MM.YYYY')}</td>
+                          <td style={{ ...tdL, color: '#888' }}>{validTo}</td>
+                          <td style={{ ...tdL, color: '#888' }}>{t.direction?.origin?.name || '—'}</td>
+                          <td style={{ ...tdL, color: '#888' }}>{t.direction?.destination?.name || '—'}</td>
                           <td style={td}>
-                            <Tag color={t.tariffType === 'PER_PALLET' ? 'purple' : 'blue'} style={{ fontSize: 11 }}>
+                            <Tag color={t.tariffType === 'PER_PALLET' ? 'purple' : 'blue'} style={{ fontSize: 11, opacity: 0.6 }}>
                               {t.tariffType === 'PER_PALLET' ? 'паллет' : 'рейс'}
                             </Tag>
                           </td>
                           <td style={td}>
                             {t.pricePerPallet != null
-                              ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace' }}>{Number(t.pricePerPallet).toLocaleString('ru')} ₽</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
+                              ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace', color: '#888' }}>{Number(t.pricePerPallet).toLocaleString('ru')} ₽</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
                               : <span style={{ color: '#ccc' }}>—</span>}
                           </td>
-                          {groupVtList.map((vt: any) => (
+                          {displayVtList.map((vt: any) => (
                             <td key={vt.code} style={td}>
                               {tierMap[vt.code] != null
-                                ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace' }}>{tierMap[vt.code].toLocaleString('ru')}</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
+                                ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace', color: '#888' }}>{tierMap[vt.code].toLocaleString('ru')}</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
                                 : <span style={{ color: '#e0e0e0' }}>—</span>}
                             </td>
                           ))}
-                          <td style={td}>
-                            <Space size={0}>
-                              <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(t)} />
-                              <Popconfirm title="Удалить тариф?" onConfirm={() => onDeleteTariff(t.id)}>
-                                <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-                              </Popconfirm>
-                            </Space>
-                          </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
-              </div>
-              {di < dates.length - 1 && <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 20 }} />}
+              )}
             </div>
-            );
-          })}
+          )}
         </div>
       </div>
 
@@ -316,10 +396,10 @@ export default function CustomerContractDetailPage() {
       >
         <Form form={form} layout="vertical" size="small">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-            <Form.Item name="originId" label="Откуда" rules={[{ required: true }]}>
+            <Form.Item name="originId" label="Откуда">
               <LocationSelect style={{ width: '100%' }} />
             </Form.Item>
-            <Form.Item name="destinationId" label="Куда" rules={[{ required: true }]}>
+            <Form.Item name="destinationId" label="Куда">
               <LocationSelect style={{ width: '100%' }} />
             </Form.Item>
           </div>

@@ -8,7 +8,7 @@ import DataTable from '@/components/DataTable';
 import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
-import { RouteSelect, VehicleTypeSelect } from '@/components/selects/EntitySelects';
+import { DirectionSelect, VehicleTypeSelect } from '@/components/selects/EntitySelects';
 import { getMarketPrices, createMarketPrice, updateMarketPrice, deleteMarketPrice } from '@/lib/actions/contracts';
 
 const fmt = (d: any) => (d ? dayjs(d).format('DD.MM.YYYY') : '—');
@@ -46,7 +46,7 @@ export default function MarketPricesPage() {
   };
 
   const columns = [
-    { title: 'Маршрут', key: 'route', render: (_: any, r: any) => r.route?.code || '—' },
+    { title: 'Направление', key: 'direction', render: (_: any, r: any) => r.direction?.name || r.direction?.code || '—' },
     { title: 'Тип ТС', key: 'vt', render: (_: any, r: any) => r.vehicleType?.name || r.vehicleTypeCode },
     { title: '₽/рейс', dataIndex: 'pricePerTrip', key: 'pricePerTrip', render: money },
     { title: '₽/паллета', dataIndex: 'pricePerPallet', key: 'pricePerPallet', render: money, responsive: ['lg'] as any },
@@ -71,7 +71,7 @@ export default function MarketPricesPage() {
         toolbar={<Space><ImportExportButtons resource="market-prices" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать цену' : 'Новая рыночная цена'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing}>
-        <Form.Item name="routeId" label="Маршрут" rules={[{ required: true }]}><RouteSelect style={{ width: '100%' }} /></Form.Item>
+        <Form.Item name="directionId" label="Направление" rules={[{ required: true }]}><DirectionSelect style={{ width: '100%' }} /></Form.Item>
         <Form.Item name="vehicleTypeCode" label="Тип ТС" rules={[{ required: true }]}><VehicleTypeSelect style={{ width: '100%' }} /></Form.Item>
         <Space size="large" wrap>
           <Form.Item name="pricePerTrip" label="₽/рейс"><InputNumber style={{ width: 150 }} min={0} /></Form.Item>

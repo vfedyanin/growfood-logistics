@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useParams, useRouter } from 'next/navigation';
-import { LocationSelect } from '@/components/selects/EntitySelects';
+import { LocationSelect, DirectionSelect } from '@/components/selects/EntitySelects';
 import AsyncSelect from '@/components/selects/AsyncSelect';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
@@ -97,6 +97,7 @@ function LegFields({ name, restField, showPrice }: { name: number; restField: an
     <Space wrap size="small">
       <Form.Item {...restField} name={[name, 'pickupLocationId']} label="Забор"><LocationSelect style={{ width: 180 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'dropoffLocationId']} label="Выгрузка"><LocationSelect style={{ width: 180 }} /></Form.Item>
+      <Form.Item {...restField} name={[name, 'directionId']} label="Направление"><DirectionSelect style={{ width: 180 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'plannedPickupDate']} label="Дата забора"><DatePicker format="DD.MM.YYYY" /></Form.Item>
       <Form.Item {...restField} name={[name, 'plannedPickupFrom']} label="с"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'plannedPickupTo']} label="до"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>

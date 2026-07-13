@@ -8,7 +8,7 @@ import DataTable from '@/components/DataTable';
 import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
-import { RouteSelect, VehicleTypeSelect, CustomerContractSelect, CarrierContractSelect } from '@/components/selects/EntitySelects';
+import { DirectionSelect, VehicleTypeSelect, CustomerContractSelect, CarrierContractSelect } from '@/components/selects/EntitySelects';
 import { getTariffs, createTariff, updateTariff, deleteTariff, getContractVat } from '@/lib/actions/contracts';
 
 const fmt = (d: any) => (d ? dayjs(d).format('DD.MM.YYYY') : '—');
@@ -94,7 +94,7 @@ export default function TariffsPage() {
             : '—',
     },
     { title: 'НДС', key: 'vat', width: 80, render: (_: any, r: any) => { const v = tariffVat(r); return v ? `${v}%` : 'без НДС'; } },
-    { title: 'Маршрут', key: 'route', render: (_: any, r: any) => r.route?.code || 'любой', responsive: ['lg'] as any },
+    { title: 'Направление', key: 'direction', render: (_: any, r: any) => r.direction?.name || r.direction?.code || 'любое', responsive: ['lg'] as any },
     { title: 'Тип ТС', key: 'vt', render: (_: any, r: any) => r.vehicleType?.name || r.vehicleTypeCode },
     { title: '₽/рейс', dataIndex: 'pricePerTrip', key: 'pricePerTrip', render: money },
     { title: '₽/рейс с НДС', key: 'pricePerTripGross', render: (_: any, r: any) => money(grossOf(r.pricePerTrip, tariffVat(r))), responsive: ['lg'] as any },
@@ -144,7 +144,7 @@ export default function TariffsPage() {
             </span>
           </div>
         )}
-        <Form.Item name="routeId" label="Маршрут (опц., пусто = любой)"><RouteSelect style={{ width: '100%' }} /></Form.Item>
+        <Form.Item name="directionId" label="Направление (опц., пусто = любое)"><DirectionSelect style={{ width: '100%' }} /></Form.Item>
         <Form.Item name="vehicleTypeCode" label="Тип ТС" rules={[{ required: true }]}><VehicleTypeSelect style={{ width: '100%' }} /></Form.Item>
         <Space size="large" wrap>
           <Form.Item name="pricePerTrip" label={priceIncludesVat ? '₽/рейс (с НДС)' : '₽/рейс (без НДС)'}>

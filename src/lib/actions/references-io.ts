@@ -295,45 +295,35 @@ const driverCfg: RefConfig = {
   ),
 };
 
-// ---------- Маршруты ----------
-const ROUTE_TYPES = ['DIRECT', 'HUB', 'MILK_RUN'];
-const routeCfg: RefConfig = {
-  label: 'Маршруты',
-  fileBaseName: 'routes',
-  paths: ['/references/routes'],
+// ---------- Направления ----------
+const directionCfg: RefConfig = {
+  label: 'Направления',
+  fileBaseName: 'directions',
+  paths: ['/references/directions'],
   exportRows: async () => {
-    const rows = await prisma.route.findMany({ include: { origin: true, destination: true }, orderBy: { code: 'asc' } });
+    const rows = await prisma.direction.findMany({ orderBy: { code: 'asc' } });
     return rows.map(r => ({
       code: r.code, name: r.name,
-      originCode: r.origin.code, destinationCode: r.destination.code,
       distanceKm: r.distanceKm != null ? Number(r.distanceKm) : null,
-      estimatedHours: r.estimatedHours != null ? Number(r.estimatedHours) : null,
-      routeType: r.routeType, isActive: r.isActive,
+      isActive: r.isActive,
     }));
   },
   parseRow: async (r, actor) => {
     const code = req(r.code, 'code');
-    const oc = req(r.originCode, 'originCode'); const dc = req(r.destinationCode, 'destinationCode');
-    const o = await prisma.location.findUnique({ where: { code: oc } });
-    if (!o) throw new Error(`'originCode'='${oc}' не найден в Локациях`);
-    const d = await prisma.location.findUnique({ where: { code: dc } });
-    if (!d) throw new Error(`'destinationCode'='${dc}' не найден в Локациях`);
     const data: any = {
-      name: s(r.name), originId: o.id, destinationId: d.id,
-      distanceKm: n(r.distanceKm), estimatedHours: n(r.estimatedHours),
-      routeType: inEnum(r.routeType, ROUTE_TYPES, 'routeType'),
+      name: s(r.name),
+      distanceKm: n(r.distanceKm),
       isActive: b(r.isActive), updatedById: actor,
     };
-    if (!data.routeType) throw new Error("'routeType' обязательно");
     return { identity: code, data, record: { code } };
   },
-  fetchDiff: async () => (await prisma.route.findMany()).map(r => ({ identity: r.code, displayName: r.code, _raw: r })),
+  fetchDiff: async () => (await prisma.direction.findMany()).map(r => ({ identity: r.code, displayName: r.code, _raw: r })),
   upsertOne: async (p, actor) => {
-    await prisma.route.upsert({ where: { code: p.record.code }, update: p.data, create: { code: p.record.code, ...p.data, createdById: actor } });
+    await prisma.direction.upsert({ where: { code: p.record.code }, update: p.data, create: { code: p.record.code, ...p.data, createdById: actor } });
   },
   deleteOne: async (raw) => deleteOrSoft(
-    () => prisma.route.delete({ where: { id: raw.id } }),
-    () => prisma.route.update({ where: { id: raw.id }, data: { isActive: false } }),
+    () => prisma.direction.delete({ where: { id: raw.id } }),
+    () => prisma.direction.update({ where: { id: raw.id }, data: { isActive: false } }),
   ),
 };
 
@@ -425,13 +415,13 @@ const tariffCfg: RefConfig = {
   fileBaseName: 'tariffs',
   paths: ['/references/tariffs'],
   exportRows: async () => {
-    const rows = await prisma.tariff.findMany({ include: { customerContract: { include: { customer: true } }, carrierContract: { include: { carrier: true } }, route: true } });
+    const rows = await prisma.tariff.findMany({ include: { customerContract: { include: { customer: true } }, carrierContract: { include: { carrier: true } }, direction: true } });
     return rows.map(r => ({
       customerContractNumber: r.customerContract?.contractNumber || null,
       customerCode: r.customerContract?.customer?.code || null,
       carrierContractNumber: r.carrierContract?.contractNumber || null,
       carrierCode: r.carrierContract?.carrier?.code || null,
-      routeCode: r.route?.code || null,
+      directionCode: r.direction?.code || null,
       vehicleTypeCode: r.vehicleTypeCode,
       pricePerTrip: r.pricePerTrip != null ? Number(r.pricePerTrip) : null,
       pricePerPallet: r.pricePerPallet != null ? Number(r.pricePerPallet) : null,
@@ -460,31 +450,31 @@ const tariffCfg: RefConfig = {
       if (!c) throw new Error(`Договор перевозчика '${carN}' (${carCode}) не найден`);
       carrierContractId = c.id;
     }
-    let routeId: string | null = null;
-    const rc = s(r.routeCode);
-    if (rc) {
-      const rt = await prisma.route.findUnique({ where: { code: rc } });
-      if (!rt) throw new Error(`'routeCode'='${rc}' не найден`);
-      routeId = rt.id;
+    let directionId: string | null = null;
+    const dc = s(r.directionCode);
+    if (dc) {
+      const dir = await prisma.direction.findUnique({ where: { code: dc } });
+      if (!dir) throw new Error(`'directionCode'='${dc}' не найдено`);
+      directionId = dir.id;
     }
     const vtCode = req(r.vehicleTypeCode, 'vehicleTypeCode');
     const vt = await prisma.vehicleType.findUnique({ where: { code: vtCode } });
     if (!vt) throw new Error(`'vehicleTypeCode'='${vtCode}' не найден`);
     const validFrom = date(r.validFrom); if (!validFrom) throw new Error("'validFrom' обязательно");
     const data: any = {
-      customerContractId, carrierContractId, routeId, vehicleTypeCode: vtCode,
+      customerContractId, carrierContractId, directionId, vehicleTypeCode: vtCode,
       pricePerTrip: n(r.pricePerTrip), pricePerPallet: n(r.pricePerPallet), pricePerKm: n(r.pricePerKm),
       validFrom, validTo: date(r.validTo), notes: s(r.notes), updatedById: actor,
     };
-    const id = `${ccN ? `CUST:${ccN}|${ccCode}` : `CARR:${carN}|${carCode}`}|${rc || '-'}|${vtCode}|${validFrom.toISOString()}`;
+    const id = `${ccN ? `CUST:${ccN}|${ccCode}` : `CARR:${carN}|${carCode}`}|${dc || '-'}|${vtCode}|${validFrom.toISOString()}`;
     return { identity: id, data, record: {} };
   },
   fetchDiff: async () => {
-    const rows = await prisma.tariff.findMany({ include: { customerContract: { include: { customer: true } }, carrierContract: { include: { carrier: true } }, route: true } });
+    const rows = await prisma.tariff.findMany({ include: { customerContract: { include: { customer: true } }, carrierContract: { include: { carrier: true } }, direction: true } });
     return rows.map(r => {
       const cn = r.customerContract ? `CUST:${r.customerContract.contractNumber}|${r.customerContract.customer.code}` : `CARR:${r.carrierContract!.contractNumber}|${r.carrierContract!.carrier.code}`;
-      const id = `${cn}|${r.route?.code || '-'}|${r.vehicleTypeCode}|${r.validFrom.toISOString()}`;
-      const disp = `${r.customerContract?.contractNumber || r.carrierContract?.contractNumber} · ${r.route?.code || '—'} · ${r.vehicleTypeCode}`;
+      const id = `${cn}|${r.direction?.code || '-'}|${r.vehicleTypeCode}|${r.validFrom.toISOString()}`;
+      const disp = `${r.customerContract?.contractNumber || r.carrierContract?.contractNumber} · ${r.direction?.code || '—'} · ${r.vehicleTypeCode}`;
       return { identity: id, displayName: disp, _raw: r };
     });
   },
@@ -493,7 +483,7 @@ const tariffCfg: RefConfig = {
     const existing = await prisma.tariff.findFirst({
       where: {
         customerContractId: p.data.customerContractId, carrierContractId: p.data.carrierContractId,
-        routeId: p.data.routeId, vehicleTypeCode: p.data.vehicleTypeCode, validFrom: p.data.validFrom,
+        directionId: p.data.directionId, vehicleTypeCode: p.data.vehicleTypeCode, validFrom: p.data.validFrom,
       },
     });
     if (existing) await prisma.tariff.update({ where: { id: existing.id }, data: p.data });
@@ -508,9 +498,9 @@ const marketPriceCfg: RefConfig = {
   fileBaseName: 'market-prices',
   paths: ['/references/market-prices'],
   exportRows: async () => {
-    const rows = await prisma.marketPrice.findMany({ include: { route: true } });
+    const rows = await prisma.marketPrice.findMany({ include: { direction: true } });
     return rows.map(r => ({
-      routeCode: r.route.code, vehicleTypeCode: r.vehicleTypeCode,
+      directionCode: r.direction.code, vehicleTypeCode: r.vehicleTypeCode,
       pricePerTrip: r.pricePerTrip != null ? Number(r.pricePerTrip) : null,
       pricePerPallet: r.pricePerPallet != null ? Number(r.pricePerPallet) : null,
       pricePerKm: r.pricePerKm != null ? Number(r.pricePerKm) : null,
@@ -518,27 +508,27 @@ const marketPriceCfg: RefConfig = {
     }));
   },
   parseRow: async (r, actor) => {
-    const rc = req(r.routeCode, 'routeCode');
-    const rt = await prisma.route.findUnique({ where: { code: rc } });
-    if (!rt) throw new Error(`'routeCode'='${rc}' не найден`);
+    const dc = req(r.directionCode, 'directionCode');
+    const dir = await prisma.direction.findUnique({ where: { code: dc } });
+    if (!dir) throw new Error(`'directionCode'='${dc}' не найдено`);
     const vtCode = req(r.vehicleTypeCode, 'vehicleTypeCode');
     const vt = await prisma.vehicleType.findUnique({ where: { code: vtCode } });
     if (!vt) throw new Error(`'vehicleTypeCode'='${vtCode}' не найден`);
     const validFrom = date(r.validFrom); if (!validFrom) throw new Error("'validFrom' обязательно");
     const data: any = {
-      routeId: rt.id, vehicleTypeCode: vtCode,
+      directionId: dir.id, vehicleTypeCode: vtCode,
       pricePerTrip: n(r.pricePerTrip), pricePerPallet: n(r.pricePerPallet), pricePerKm: n(r.pricePerKm),
       validFrom, validTo: date(r.validTo), source: s(r.source), updatedById: actor,
     };
-    const id = `${rc}|${vtCode}|${validFrom.toISOString()}`;
+    const id = `${dc}|${vtCode}|${validFrom.toISOString()}`;
     return { identity: id, data, record: {} };
   },
   fetchDiff: async () => {
-    const rows = await prisma.marketPrice.findMany({ include: { route: true } });
-    return rows.map(r => ({ identity: `${r.route.code}|${r.vehicleTypeCode}|${r.validFrom.toISOString()}`, displayName: `${r.route.code} · ${r.vehicleTypeCode}`, _raw: r }));
+    const rows = await prisma.marketPrice.findMany({ include: { direction: true } });
+    return rows.map(r => ({ identity: `${r.direction.code}|${r.vehicleTypeCode}|${r.validFrom.toISOString()}`, displayName: `${r.direction.code} · ${r.vehicleTypeCode}`, _raw: r }));
   },
   upsertOne: async (p, actor) => {
-    const existing = await prisma.marketPrice.findFirst({ where: { routeId: p.data.routeId, vehicleTypeCode: p.data.vehicleTypeCode, validFrom: p.data.validFrom } });
+    const existing = await prisma.marketPrice.findFirst({ where: { directionId: p.data.directionId, vehicleTypeCode: p.data.vehicleTypeCode, validFrom: p.data.validFrom } });
     if (existing) await prisma.marketPrice.update({ where: { id: existing.id }, data: p.data });
     else await prisma.marketPrice.create({ data: { ...p.data, createdById: actor } });
   },
@@ -554,7 +544,7 @@ const CONFIGS: Record<string, RefConfig> = {
   customers: customerCfg,
   vehicles: vehicleCfg,
   drivers: driverCfg,
-  routes: routeCfg,
+  directions: directionCfg,
   'customer-contracts': customerContractCfg,
   'carrier-contracts': carrierContractCfg,
   tariffs: tariffCfg,

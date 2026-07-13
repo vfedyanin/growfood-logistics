@@ -41,7 +41,7 @@ export default function TripEconomicsPage() {
     { title: 'Перевозчик', key: 'carrier', render: (_: any, r: any) => r.carrier?.name || '—', responsive: ['lg'] as any },
     { title: 'Тип ТС', key: 'vt', render: (_: any, r: any) => r.vehicle?.vehicleType?.name || '—', responsive: ['lg'] as any },
     { title: 'Паллет', key: 'pallets', render: (_: any, r: any) => palletsOf(r) || '—', width: 90 },
-    { title: 'Расстояние, км', key: 'km', render: (_: any, r: any) => (r.route?.distanceKm != null ? Number(r.route.distanceKm) : '—'), responsive: ['lg'] as any, width: 130 },
+    { title: 'Расстояние, км', key: 'km', render: (_: any, r: any) => (r.direction?.distanceKm != null ? Number(r.direction.distanceKm) : '—'), responsive: ['lg'] as any, width: 130 },
     { title: 'Статус', dataIndex: 'status', key: 'status', render: (s: string) => <Tag color={statusCfg[s]?.color}>{statusCfg[s]?.label || s}</Tag>, responsive: ['lg'] as any },
     { title: 'Себестоимость (тариф)', dataIndex: 'actualCost', key: 'cost', render: (v: any) => <b>{rub(v)}</b>, width: 180 },
     {

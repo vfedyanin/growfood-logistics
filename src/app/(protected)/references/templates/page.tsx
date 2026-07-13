@@ -6,6 +6,7 @@ import {
   Typography, Descriptions, Divider, Card, Empty,
 } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
+import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
 import {
   getRequestTemplatesFull, getRequestTemplateFull,
@@ -94,6 +95,7 @@ function TemplatesTab({
   onDelete,
   ViewComponent,
   extraColumns,
+  editUrl,
 }: {
   loadList: () => Promise<any[]>;
   loadOne: (id: string) => Promise<any>;
@@ -101,9 +103,12 @@ function TemplatesTab({
   onDelete: (id: string) => Promise<void>;
   ViewComponent: React.ComponentType<{ item: any }>;
   extraColumns?: any[];
+  editUrl?: (id: string) => string;
 }) {
+  const router = useRouter();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pageSize, setPageSize] = useState(50);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renaming, setRenaming] = useState<any>(null);
   const [viewOpen, setViewOpen] = useState(false);
@@ -193,7 +198,7 @@ function TemplatesTab({
         loading={loading}
         dataSource={items}
         columns={columns}
-        pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['20', '50', '100'], showTotal: (t) => `Всего: ${t}` }}
+        pagination={{ pageSize, showSizeChanger: true, pageSizeOptions: ['20', '50', '100'], showTotal: (t) => `Всего: ${t}`, onShowSizeChange: (_cur: number, size: number) => setPageSize(size) }}
         locale={{ emptyText: 'Шаблонов нет' }}
       />
 
@@ -209,13 +214,13 @@ function TemplatesTab({
         {!viewLoading && viewItem && <ViewComponent item={viewItem} />}
       </Modal>
 
-      {/* Переименование */}
+      {/* Редактирование */}
       <Modal
         open={renameOpen}
         onOk={submitRename}
         onCancel={() => setRenameOpen(false)}
-        title="Переименовать шаблон"
-        okText="Сохранить"
+        title="Редактировать шаблон"
+        okText="Сохранить название"
         cancelText="Отмена"
       >
         <Form form={form} layout="vertical">
@@ -223,6 +228,19 @@ function TemplatesTab({
             <Input />
           </Form.Item>
         </Form>
+        {editUrl && renaming && (
+          <>
+            <Divider style={{ margin: '12px 0 8px' }} />
+            <Typography.Text type="secondary">
+              Изменить содержимое шаблона (грузы, маршруты, ценообразование):{' '}
+              <Typography.Link
+                onClick={() => { setRenameOpen(false); router.push(editUrl(renaming.id)); }}
+              >
+                открыть в форме →
+              </Typography.Link>
+            </Typography.Text>
+          </>
+        )}
       </Modal>
     </>
   );
@@ -245,6 +263,7 @@ export default function TemplatesPage() {
                 onUpdate={(id, p) => updateRequestTemplate(id, p)}
                 onDelete={deleteRequestTemplate}
                 ViewComponent={RequestTemplateView}
+                editUrl={(id) => `/requests?editTemplate=${id}`}
                 extraColumns={[
                   {
                     title: 'Заявитель',
@@ -265,6 +284,7 @@ export default function TemplatesPage() {
                 onUpdate={(id, p) => updateTripTemplate(id, p)}
                 onDelete={deleteTripTemplate}
                 ViewComponent={TripTemplateView}
+                editUrl={(id) => `/operations/trips?editTemplate=${id}`}
                 extraColumns={[
                   {
                     title: 'Перевозчик',

@@ -32,7 +32,7 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
     prisma.trip.findMany({
       where,
       include: {
-        route: true, carrier: true, vertical: true,
+        direction: true, carrier: true, vertical: true,
         vehicleType: true,
         vehicle: { include: { vehicleType: true } },
         origin: true, destination: true,
@@ -68,10 +68,10 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
     const date = effDate(t) || new Date();
     const valid = cands.filter((x) => x.validFrom <= date && (x.validTo == null || x.validTo >= date));
     const pool = valid.length ? valid : cands;
-    const pick = (t.routeId && pool.find((x) => x.routeId === t.routeId)) || pool.find((x) => x.routeId == null) || pool[0];
+    const pick = (t.directionId && pool.find((x) => x.directionId === t.directionId)) || pool.find((x) => x.directionId == null) || pool[0];
     if (!pick) return 0;
     const pallets = palletsOf(t);
-    const km = t.route?.distanceKm ? Number(t.route.distanceKm) : 0;
+    const km = t.direction?.distanceKm ? Number(t.direction.distanceKm) : 0;
     if (pick.pricePerTrip != null) return Number(pick.pricePerTrip);
     if (pick.pricePerPallet != null) return Number(pick.pricePerPallet) * pallets;
     if (pick.pricePerKm != null) return Number(pick.pricePerKm) * km;
@@ -103,15 +103,15 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
   const mpMap = new Map<string, number>();
   for (const mp of marketPrices) {
     if (mp.pricePerTrip != null) {
-      const k = `${mp.routeId}|${mp.vehicleTypeCode}`;
+      const k = `${mp.directionId}|${mp.vehicleTypeCode}`;
       if (!mpMap.has(k)) mpMap.set(k, num(mp.pricePerTrip));
     }
   }
   let marketTotal = 0, hasMarket = false;
   for (const t of trips) {
     const vt = effVtCode(t);
-    if (t.routeId && vt) {
-      const p = mpMap.get(`${t.routeId}|${vt}`);
+    if (t.directionId && vt) {
+      const p = mpMap.get(`${t.directionId}|${vt}`);
       if (p) { marketTotal += p; hasMarket = true; }
     }
   }
@@ -148,12 +148,12 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
   const avgLoadPct = loadN ? sumLoad / loadN : 0;
   const loadByType = Array.from(typeMap.entries()).map(([type, v]) => ({ type, avgLoad: Math.round(v.sum / v.n), trips: v.n }));
 
-  // ===== 3. Эффективность маршрутов =====
+  // ===== 3. Эффективность направлений =====
   const routeMap = new Map<string, { label: string; trips: number; cost: number; pallets: number; km: number }>();
   for (const t of trips) {
-    const key = t.routeId || `${t.originId}-${t.destinationId}`;
-    const label = t.route?.code || `${t.origin?.name || '—'} → ${t.destination?.name || '—'}`;
-    const km = num(t.route?.distanceKm);
+    const key = t.directionId || `${t.originId}-${t.destinationId}`;
+    const label = t.direction?.name || t.direction?.code || `${t.origin?.name || '—'} → ${t.destination?.name || '—'}`;
+    const km = num(t.direction?.distanceKm);
     const e = routeMap.get(key) || { label, trips: 0, cost: 0, pallets: 0, km };
     e.trips++; e.cost += costOf(t); e.pallets += palletsOf(t);
     routeMap.set(key, e);
@@ -235,7 +235,7 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
         include: {
           tripCargoUnit: {
             include: {
-              trip: { include: { route: true, vehicle: { include: { vehicleType: true } }, vehicleType: true, cargoUnits: true } },
+              trip: { include: { direction: true, vehicle: { include: { vehicleType: true } }, vehicleType: true, cargoUnits: true } },
             },
           },
         },
