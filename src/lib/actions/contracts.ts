@@ -302,7 +302,7 @@ export async function createCarrierTariffGroup(contractId: string, data: {
   if (!resolvedDirectionId && data.originId && data.destinationId) {
     resolvedDirectionId = await findOrCreateDirection(data.originId, data.destinationId);
   }
-  const rows = data.tripPrices.map(tp => ({
+  const rows: any[] = data.tripPrices.map(tp => ({
     carrierContractId: contractId,
     directionId: resolvedDirectionId,
     vehicleTypeCode: tp.vehicleTypeCode,

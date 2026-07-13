@@ -33,8 +33,8 @@ function groupByDirection(tariffs: any[]): RouteData[] {
     entry.byDate.get(dk)!.push(t);
   }
   const result: RouteData[] = [];
-  for (const [, { direction, byDate }] of byDir) {
-    const sortedDates = [...byDate.keys()].sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+  for (const [, { direction, byDate }] of Array.from(byDir)) {
+    const sortedDates = Array.from(byDate.keys()).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
     result.push({ direction, dateGroups: sortedDates.map(d => ({ validFrom: d, tariffs: byDate.get(d)! })) });
   }
   return result;

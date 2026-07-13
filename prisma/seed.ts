@@ -165,7 +165,7 @@ async function main() {
   ];
   const rt: Record<string, any> = {};
   for (const r of routesData) {
-    rt[r.code] = await prisma.route.upsert({ where: { code: r.code }, update: r, create: r });
+    rt[r.code] = await prisma.direction.upsert({ where: { code: r.code }, update: r, create: r });
   }
 
   const now = new Date();
@@ -180,7 +180,7 @@ async function main() {
       tripNumber: 'TRIP-20260315-001',
       tripType: 'OWN',
       verticalCode: 'RETAIL',
-      routeId: rt['KLP-MSK'].id,
+      directionId: rt['KLP-MSK'].id,
       originId: loc['KOLPINO'].id,
       destinationId: loc['MSK_DC'].id,
       vehicleId: veh['А123БВ78'].id,
@@ -211,7 +211,7 @@ async function main() {
       tripNumber: 'TRIP-20260316-002',
       tripType: 'LAAS',
       verticalCode: 'LAAS',
-      routeId: rt['KLP-SPB'].id,
+      directionId: rt['KLP-SPB'].id,
       originId: loc['KOLPINO'].id,
       destinationId: loc['SPB_DC'].id,
       vehicleId: veh['К456МН77'].id,
@@ -242,7 +242,7 @@ async function main() {
       tripNumber: 'TRIP-20260320-003',
       tripType: 'OWN',
       verticalCode: 'RETAIL',
-      routeId: rt['KLP-MSK'].id,
+      directionId: rt['KLP-MSK'].id,
       originId: loc['KOLPINO'].id,
       destinationId: loc['MSK_DC'].id,
       vehicleId: veh['А123БВ78'].id,
@@ -297,8 +297,8 @@ async function main() {
   if (mpExists === 0) {
     await prisma.marketPrice.createMany({
       data: [
-        { routeId: rt['KLP-MSK'].id, vehicleTypeCode: 'REF_20T', pricePerTrip: 90000, pricePerPallet: 2700, validFrom: daysAgo(60), source: 'ПФГК прайс' },
-        { routeId: rt['KLP-SPB'].id, vehicleTypeCode: 'TRUCK_20T', pricePerTrip: 20000, pricePerPallet: 900, validFrom: daysAgo(60), source: 'звонок ИП Иванов' },
+        { directionId: rt['KLP-MSK'].id, vehicleTypeCode: 'REF_20T', pricePerTrip: 90000, pricePerPallet: 2700, validFrom: daysAgo(60), source: 'ПФГК прайс' },
+        { directionId: rt['KLP-SPB'].id, vehicleTypeCode: 'TRUCK_20T', pricePerTrip: 20000, pricePerPallet: 900, validFrom: daysAgo(60), source: 'звонок ИП Иванов' },
       ],
     });
   }
