@@ -272,18 +272,18 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
     where: { customerContractId: { not: null } },
     include: {
       customerContract: { select: { customerId: true, members: { select: { customerId: true } } } },
-      route: { select: { destinationId: true } },
+      direction: { select: { destinationId: true } },
       tiers: { include: { vehicleType: { select: { capacityPallets: true } } } },
     },
     orderBy: { validFrom: 'desc' },
   });
   const clientTIdx = new Map<string, any[]>(); // `${partyId}|${destinationId}` → тарифы
   for (const t of clientTariffsRaw) {
-    const dest = t.route?.destinationId;
+    const dest = (t as any).direction?.destinationId;
     if (!dest) continue;
     const parties = new Set<string>();
-    if (t.customerContract?.customerId) parties.add(t.customerContract.customerId);
-    for (const m of t.customerContract?.members || []) parties.add(m.customerId);
+    if ((t as any).customerContract?.customerId) parties.add((t as any).customerContract.customerId);
+    for (const m of (t as any).customerContract?.members || []) parties.add(m.customerId);
     for (const pid of Array.from(parties)) {
       const k = `${pid}|${dest}`;
       const arr = clientTIdx.get(k) || [];
