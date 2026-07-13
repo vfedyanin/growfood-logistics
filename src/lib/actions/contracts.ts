@@ -122,6 +122,27 @@ export async function unlinkGroupRequest(requestId: string) {
 }
 
 // ============ CustomerContract detail ============
+const directionWithLocations = { include: { origin: true, destination: true } } as const;
+
+async function findOrCreateDirection(originId: string, destinationId: string): Promise<string> {
+  const existing = await prisma.direction.findFirst({
+    where: { originId, destinationId },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (existing) return existing.id;
+  const [origin, dest] = await Promise.all([
+    prisma.location.findUnique({ where: { id: originId }, select: { code: true, name: true } }),
+    prisma.location.findUnique({ where: { id: destinationId }, select: { code: true, name: true } }),
+  ]);
+  const baseCode = `${origin?.code || originId.slice(0, 4)}-${dest?.code || destinationId.slice(0, 4)}`;
+  let code = baseCode;
+  let i = 2;
+  while (await prisma.direction.findUnique({ where: { code } })) code = `${baseCode}-${i++}`;
+  return (await prisma.direction.create({
+    data: { code, name: `${origin?.name || '—'} → ${dest?.name || '—'}`, originId, destinationId },
+  })).id;
+}
+
 export async function getCustomerContractDetail(id: string) {
   await requireAuth();
   return serialize(await prisma.customerContract.findUnique({
@@ -131,7 +152,7 @@ export async function getCustomerContractDetail(id: string) {
       members: { include: { customer: true } },
       tariffs: {
         include: {
-          route: { include: { origin: true, destination: true } },
+          direction: directionWithLocations,
           tiers: { orderBy: { vehicleTypeCode: 'asc' } },
         },
         orderBy: { validFrom: 'desc' },
@@ -148,30 +169,21 @@ export async function updateCustomerContractNotes(id: string, notes: string) {
   return r;
 }
 
-export async function findOrCreateRoute(originId: string, destinationId: string) {
-  await requirePermission(W);
-  const existing = await prisma.route.findFirst({ where: { originId, destinationId } });
-  if (existing) return existing;
-  const origin = await prisma.location.findUnique({ where: { id: originId }, select: { name: true } });
-  const dest = await prisma.location.findUnique({ where: { id: destinationId }, select: { name: true } });
-  const code = `${(origin?.name || originId).slice(0, 6).toUpperCase().replace(/\s/g, '')}-${(dest?.name || destinationId).slice(0, 6).toUpperCase().replace(/\s/g, '')}`.slice(0, 20);
-  const unique = `${code}-${Date.now().toString(36)}`;
-  return prisma.route.create({ data: { code: unique, originId, destinationId, routeType: 'DIRECT' } });
-}
-
 export async function createContractTariff(contractId: string, data: {
-  originId: string; destinationId: string; tariffType: 'PER_PALLET' | 'PER_TRIP';
+  originId?: string | null; destinationId?: string | null;
+  tariffType: 'PER_PALLET' | 'PER_TRIP';
   validFrom: string; pricePerPallet?: number | null; vatRatePct: number;
   tiers?: { vehicleTypeCode: string; price: number }[];
 }) {
   await requirePermission(W);
   const actor = await getActorId();
-  const route = await findOrCreateRoute(data.originId, data.destinationId);
   const toNet = (v: number) => data.vatRatePct > 0 ? Math.round(v / (1 + data.vatRatePct / 100) * 100) / 100 : v;
+  let directionId: string | null = null;
+  if (data.originId && data.destinationId) directionId = await findOrCreateDirection(data.originId, data.destinationId);
   const r = await prisma.tariff.create({
     data: {
       customerContractId: contractId,
-      routeId: route.id,
+      directionId,
       tariffType: data.tariffType,
       validFrom: new Date(data.validFrom),
       pricePerPallet: data.tariffType === 'PER_PALLET' && data.pricePerPallet != null ? toNet(data.pricePerPallet) : null,
@@ -186,30 +198,38 @@ export async function createContractTariff(contractId: string, data: {
 }
 
 export async function updateContractTariff(tariffId: string, contractId: string, data: {
-  originId: string; destinationId: string; tariffType: 'PER_PALLET' | 'PER_TRIP';
+  originId?: string | null; destinationId?: string | null;
+  tariffType: 'PER_PALLET' | 'PER_TRIP';
   validFrom: string; pricePerPallet?: number | null; vatRatePct: number;
   tiers?: { vehicleTypeCode: string; price: number }[];
 }) {
   await requirePermission(W);
-  const actor = await getActorId();
-  const route = await findOrCreateRoute(data.originId, data.destinationId);
-  const toNet = (v: number) => data.vatRatePct > 0 ? Math.round(v / (1 + data.vatRatePct / 100) * 100) / 100 : v;
-  await prisma.tariffTier.deleteMany({ where: { tariffId } });
-  const r = await prisma.tariff.update({
-    where: { id: tariffId },
-    data: {
-      routeId: route.id,
-      tariffType: data.tariffType,
-      validFrom: new Date(data.validFrom),
-      pricePerPallet: data.tariffType === 'PER_PALLET' && data.pricePerPallet != null ? toNet(data.pricePerPallet) : null,
-      updatedById: actor,
-      tiers: data.tariffType === 'PER_TRIP' && data.tiers?.length
-        ? { create: data.tiers.map(t => ({ vehicleTypeCode: t.vehicleTypeCode, price: toNet(t.price) })) }
-        : undefined,
-    },
-  });
-  revalidatePath(`/references/customer-contracts/${contractId}`);
-  return r;
+  const existing = await prisma.tariff.findFirst({ where: { id: tariffId }, select: { validFrom: true } });
+  const oldDate = existing ? new Date(existing.validFrom).toISOString().split('T')[0] : null;
+  const dateChanged = oldDate !== data.validFrom;
+  if (!dateChanged) {
+    const actor = await getActorId();
+    const toNet = (v: number) => data.vatRatePct > 0 ? Math.round(v / (1 + data.vatRatePct / 100) * 100) / 100 : v;
+    let directionId: string | null = null;
+    if (data.originId && data.destinationId) directionId = await findOrCreateDirection(data.originId, data.destinationId);
+    await prisma.tariffTier.deleteMany({ where: { tariffId } });
+    await prisma.tariff.update({
+      where: { id: tariffId },
+      data: {
+        directionId,
+        tariffType: data.tariffType,
+        validFrom: new Date(data.validFrom),
+        pricePerPallet: data.tariffType === 'PER_PALLET' && data.pricePerPallet != null ? toNet(data.pricePerPallet) : null,
+        updatedById: actor,
+        tiers: data.tariffType === 'PER_TRIP' && data.tiers?.length
+          ? { create: data.tiers.map(t => ({ vehicleTypeCode: t.vehicleTypeCode, price: toNet(t.price) })) }
+          : undefined,
+      },
+    });
+    revalidatePath(`/references/customer-contracts/${contractId}`);
+  } else {
+    await createContractTariff(contractId, data);
+  }
 }
 
 export async function deleteContractTariff(tariffId: string, contractId: string) {
@@ -243,6 +263,97 @@ export async function deleteCarrierContract(id: string) {
   revalidatePath('/references/carrier-contracts');
 }
 
+export async function getCarrierContractDetail(id: string) {
+  await requireAuth();
+  return serialize(await prisma.carrierContract.findUnique({
+    where: { id },
+    include: {
+      carrier: true,
+      tariffs: {
+        include: {
+          direction: directionWithLocations,
+          tiers: { orderBy: { vehicleTypeCode: 'asc' } },
+        },
+        orderBy: { validFrom: 'desc' },
+      },
+    },
+  }));
+}
+
+export async function updateCarrierContractNotes(id: string, notes: string) {
+  await requirePermission(W);
+  const actor = await getActorId();
+  const r = await prisma.carrierContract.update({ where: { id }, data: { notes, updatedById: actor } });
+  revalidatePath(`/references/carrier-contracts/${id}`);
+  return r;
+}
+
+// Создаёт группу тарифов для одного направления: отдельная строка на каждый тип ТС
+export async function createCarrierTariffGroup(contractId: string, data: {
+  originId?: string | null; destinationId?: string | null;
+  directionId?: string | null; validFrom: string; vatRatePct: number;
+  pricePerPallet?: number | null;
+  tripPrices: { vehicleTypeCode: string; pricePerTrip: number }[];
+}) {
+  await requirePermission(W);
+  const actor = await getActorId();
+  const toNet = (v: number) => data.vatRatePct > 0 ? Math.round(v / (1 + data.vatRatePct / 100) * 100) / 100 : v;
+  let resolvedDirectionId: string | null = data.directionId ?? null;
+  if (!resolvedDirectionId && data.originId && data.destinationId) {
+    resolvedDirectionId = await findOrCreateDirection(data.originId, data.destinationId);
+  }
+  const rows: any[] = data.tripPrices.map(tp => ({
+    carrierContractId: contractId,
+    directionId: resolvedDirectionId,
+    vehicleTypeCode: tp.vehicleTypeCode,
+    tariffType: 'PER_TRIP' as const,
+    validFrom: new Date(data.validFrom),
+    pricePerTrip: toNet(tp.pricePerTrip),
+    pricePerPallet: data.pricePerPallet != null ? toNet(data.pricePerPallet) : null,
+    createdById: actor, updatedById: actor,
+  }));
+  if (rows.length === 0 && data.pricePerPallet != null) {
+    rows.push({
+      carrierContractId: contractId,
+      directionId: data.directionId ?? null,
+      vehicleTypeCode: null as any,
+      tariffType: 'PER_PALLET' as const,
+      validFrom: new Date(data.validFrom),
+      pricePerTrip: null as any,
+      pricePerPallet: toNet(data.pricePerPallet),
+      createdById: actor, updatedById: actor,
+    });
+  }
+  await prisma.tariff.createMany({ data: rows });
+  revalidatePath(`/references/carrier-contracts/${contractId}`);
+}
+
+// Обновляет группу.
+// Если дата изменилась — старые записи СОХРАНЯЮТСЯ (уйдут в историю), создаются новые.
+// Если дата та же — старые удаляются, создаются новые (обновление на месте).
+export async function updateCarrierTariffGroup(tariffIds: string[], contractId: string, data: {
+  originId?: string | null; destinationId?: string | null;
+  directionId?: string | null; validFrom: string; vatRatePct: number;
+  pricePerPallet?: number | null;
+  tripPrices: { vehicleTypeCode: string; pricePerTrip: number }[];
+}) {
+  await requirePermission(W);
+  const existing = await prisma.tariff.findFirst({ where: { id: { in: tariffIds } }, select: { validFrom: true } });
+  const oldDate = existing ? new Date(existing.validFrom).toISOString().split('T')[0] : null;
+  const dateChanged = oldDate !== data.validFrom;
+  if (!dateChanged) {
+    await prisma.tariff.deleteMany({ where: { id: { in: tariffIds } } });
+  }
+  await createCarrierTariffGroup(contractId, data);
+}
+
+// Удаляет всю группу тарифов маршрута
+export async function deleteCarrierTariffGroup(tariffIds: string[], contractId: string) {
+  await requirePermission(W);
+  await prisma.tariff.deleteMany({ where: { id: { in: tariffIds } } });
+  revalidatePath(`/references/carrier-contracts/${contractId}`);
+}
+
 // ============ Tariff (полиморфный: один из contract id) ============
 export async function getTariffs() {
   await requireAuth();
@@ -250,7 +361,7 @@ export async function getTariffs() {
     include: {
       customerContract: { include: { customer: true } },
       carrierContract: { include: { carrier: true } },
-      route: true,
+      direction: true,
       vehicleType: true,
     },
     orderBy: { validFrom: 'desc' },
@@ -292,7 +403,7 @@ export async function deleteTariff(id: string) {
 // ============ MarketPrice ============
 export async function getMarketPrices() {
   await requireAuth();
-  return serialize(await prisma.marketPrice.findMany({ include: { route: true, vehicleType: true }, orderBy: { validFrom: 'desc' } }));
+  return serialize(await prisma.marketPrice.findMany({ include: { direction: true, vehicleType: true }, orderBy: { validFrom: 'desc' } }));
 }
 export async function createMarketPrice(data: any) {
   await requirePermission(W);

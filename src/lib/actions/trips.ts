@@ -10,7 +10,7 @@ type TripStatus = 'DRAFT' | 'PLANNED' | 'IN_TRANSIT' | 'COMPLETED' | 'CANCELLED'
 const tripInclude = {
   origin: true,
   destination: true,
-  route: true,
+  direction: true,
   vehicle: { include: { vehicleType: true } },
   vehicleType: true,
   driver: true,
@@ -321,7 +321,7 @@ export async function calculateTripEconomics(tripId: string) {
   await requireRole(TRIP_W);
   const trip = await prisma.trip.findUnique({
     where: { id: tripId },
-    include: { route: true, vehicle: { include: { vehicleType: true } }, cargoUnits: { select: { pallets: true } } },
+    include: { direction: true, vehicle: { include: { vehicleType: true } }, cargoUnits: { select: { pallets: true } } },
   });
   if (!trip) throw new Error('Рейс не найден');
   if (!trip.carrierId) throw new Error('У рейса не указан перевозчик');
@@ -335,15 +335,14 @@ export async function calculateTripEconomics(tripId: string) {
     validFrom: { lte: date },
     AND: [{ OR: [{ validTo: null }, { validTo: { gte: date } }] }],
   };
-  if (trip.routeId) where.AND.push({ OR: [{ routeId: trip.routeId }, { routeId: null }] });
+  if (trip.directionId) where.AND.push({ OR: [{ directionId: trip.directionId }, { directionId: null }] });
 
   const tariffs = await prisma.tariff.findMany({ where, orderBy: { validFrom: 'desc' } });
-  // приоритет: тариф под конкретный маршрут, затем «любой маршрут»
-  const chosen = (trip.routeId && tariffs.find((t) => t.routeId === trip.routeId)) || tariffs.find((t) => t.routeId == null) || tariffs[0];
-  if (!chosen) throw new Error('Не найден подходящий тариф перевозчика (договор/тип ТС/маршрут/дата)');
+  const chosen = (trip.directionId && tariffs.find((t) => t.directionId === trip.directionId)) || tariffs.find((t) => t.directionId == null) || tariffs[0];
+  if (!chosen) throw new Error('Не найден подходящий тариф перевозчика (договор/тип ТС/направление/дата)');
 
   const pallets = trip.actualPallets ?? trip.plannedPallets ?? trip.cargoUnits.reduce((s, c) => s + (c.pallets || 0), 0);
-  const km = trip.route?.distanceKm ? Number(trip.route.distanceKm) : 0;
+  const km = trip.direction?.distanceKm ? Number(trip.direction.distanceKm) : 0;
 
   let cost = 0;
   let basis = '';
@@ -362,7 +361,7 @@ export async function calculateTripEconomics(tripId: string) {
 }
 
 // Предрасчёт себестоимости по параметрам формы (без сохранения) — для кнопки «Рассчитать» в форме рейса
-export async function previewTripEconomics(params: { carrierId?: string; vehicleId?: string; routeId?: string; plannedDeparture?: string; pallets?: number }) {
+export async function previewTripEconomics(params: { carrierId?: string; vehicleId?: string; directionId?: string; plannedDeparture?: string; pallets?: number }) {
   await requireAuth();
   if (!params.carrierId) throw new Error('Укажите перевозчика');
   if (!params.vehicleId) throw new Error('Укажите ТС (нужен тип ТС для тарифа)');
@@ -372,7 +371,7 @@ export async function previewTripEconomics(params: { carrierId?: string; vehicle
 
   const date = params.plannedDeparture ? new Date(params.plannedDeparture) : new Date();
   let km = 0;
-  if (params.routeId) { const route = await prisma.route.findUnique({ where: { id: params.routeId } }); km = route?.distanceKm ? Number(route.distanceKm) : 0; }
+  if (params.directionId) { const dir = await prisma.direction.findUnique({ where: { id: params.directionId } }); km = dir?.distanceKm ? Number(dir.distanceKm) : 0; }
 
   const where: any = {
     carrierContract: { carrierId: params.carrierId },
@@ -380,10 +379,10 @@ export async function previewTripEconomics(params: { carrierId?: string; vehicle
     validFrom: { lte: date },
     AND: [{ OR: [{ validTo: null }, { validTo: { gte: date } }] }],
   };
-  if (params.routeId) where.AND.push({ OR: [{ routeId: params.routeId }, { routeId: null }] });
+  if (params.directionId) where.AND.push({ OR: [{ directionId: params.directionId }, { directionId: null }] });
 
   const tariffs = await prisma.tariff.findMany({ where, orderBy: { validFrom: 'desc' } });
-  const chosen = (params.routeId && tariffs.find((t) => t.routeId === params.routeId)) || tariffs.find((t) => t.routeId == null) || tariffs[0];
+  const chosen = (params.directionId && tariffs.find((t) => t.directionId === params.directionId)) || tariffs.find((t) => t.directionId == null) || tariffs[0];
   if (!chosen) throw new Error('Не найден подходящий тариф перевозчика (договор/тип ТС/маршрут/дата)');
 
   const pallets = params.pallets || 0;

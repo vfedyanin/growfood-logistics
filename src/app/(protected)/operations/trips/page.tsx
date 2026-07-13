@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Button, Form, InputNumber, Select, DatePicker, Space, Popconfirm, Tag, message,
   Divider, Dropdown, Modal, Typography, Input,
@@ -19,7 +19,7 @@ import DataTable from '@/components/DataTable';
 import EntityForm from '@/components/EntityForm';
 import FilterBar from '@/components/FilterBar';
 import {
-  CarrierSelect, VehicleTypeSelect,
+  CarrierSelect, VehicleTypeSelect, DirectionSelect,
 } from '@/components/selects/EntitySelects';
 import { VehicleSelectCreatable, DriverSelectCreatable } from '@/components/selects/CreatableSelects';
 import {
@@ -170,6 +170,21 @@ export default function TripsPage() {
     if (trip) onEdit(trip);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, searchParams]);
+
+  // Автооткрытие шаблона из ?editTemplate=<id> (переход со страницы шаблонов)
+  const editTemplateApplied = useRef(false);
+  useEffect(() => {
+    const tplId = searchParams.get('editTemplate');
+    if (!tplId || editTemplateApplied.current || templates.length === 0) return;
+    editTemplateApplied.current = true;
+    setEditing(null); setExistingCargo([]); setRemoveIds([]);
+    setSelTemplate(undefined);
+    form.resetFields();
+    form.setFieldsValue({ tripType: forcedTripType || 'OWN', routeStops: [] });
+    setOpen(true);
+    applyTemplate(tplId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, templates]);
 
   const onAdd = () => {
     setEditing(null);
@@ -371,6 +386,7 @@ export default function TripsPage() {
           <Form.Item name="vehicleId" label="ТС"><VehicleSelectCreatable style={{ width: 220 }} /></Form.Item>
           <Form.Item name="driverId" label="Водитель"><DriverSelectCreatable style={{ width: 220 }} /></Form.Item>
           <Form.Item name="vehicleTypeCode" label="Тип ТС"><VehicleTypeSelect style={{ width: 180 }} /></Form.Item>
+          <Form.Item name="directionId" label="Направление"><DirectionSelect style={{ width: 220 }} /></Form.Item>
         </Space>
 
         <Divider titlePlacement="left">Маршрут</Divider>

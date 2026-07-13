@@ -23,6 +23,7 @@ import {
   SettingOutlined,
   SnippetsOutlined,
   PlusSquareOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons';
 import { useRouter, usePathname } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
@@ -59,7 +60,7 @@ const menuItems: MenuItem[] = [
     getItem('Доп. услуги', '/references/additional-services', <PlusSquareOutlined />),
     getItem('Транспорт', '/references/vehicles', <ContainerOutlined />),
     getItem('Водители', '/references/drivers', <IdcardOutlined />),
-    getItem('Маршруты', '/references/routes', <NodeIndexOutlined />),
+    getItem('Направления', '/references/directions', <NodeIndexOutlined />),
     getItem('Договоры (клиенты)', '/references/customer-contracts', <FileTextOutlined />),
     getItem('Договоры (перевозчики)', '/references/carrier-contracts', <FileTextOutlined />),
     getItem('Тарифы', '/references/tariffs', <CreditCardOutlined />),
@@ -95,6 +96,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const menuItemsView: MenuItem[] = showAdmin
     ? [...menuItems, getItem('Администрирование', '/admin', <SettingOutlined />, [
         getItem('Пользователи', '/admin/users', <TeamOutlined />),
+        getItem('FAQ', '/admin/faq', <QuestionCircleOutlined />),
       ])]
     : menuItems;
 

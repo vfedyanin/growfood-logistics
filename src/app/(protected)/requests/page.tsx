@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Button, Form, Input, InputNumber, Select, DatePicker, TimePicker, Space, Popconfirm, Tag, message,
   Dropdown, Modal, Divider, Card, Table, Descriptions, Typography, Empty, Segmented,
@@ -11,7 +11,8 @@ import DataTable from '@/components/DataTable';
 import EntityForm from '@/components/EntityForm';
 import FilterBar from '@/components/FilterBar';
 import AsyncSelect from '@/components/selects/AsyncSelect';
-import { CustomerSelect, LocationSelect, VerticalSelect } from '@/components/selects/EntitySelects';
+import { CustomerSelect, LocationSelect, VerticalSelect, DirectionSelect } from '@/components/selects/EntitySelects';
+import { useSearchParams } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
   getRequests, getRequest, createRequest, updateRequest, deleteRequest, changeRequestStatus, getCustomerVerticalCode,
@@ -92,6 +93,7 @@ function LegFields({ name, restField, showPrice }: { name: number; restField: an
     <Space wrap size="small">
       <Form.Item {...restField} name={[name, 'pickupLocationId']} label="Забор"><LocationSelect style={{ width: 180 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'dropoffLocationId']} label="Выгрузка"><LocationSelect style={{ width: 180 }} /></Form.Item>
+      <Form.Item {...restField} name={[name, 'directionId']} label="Направление"><DirectionSelect style={{ width: 180 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'plannedPickupDate']} label="Дата забора"><DatePicker format="DD.MM.YYYY" /></Form.Item>
       <Form.Item {...restField} name={[name, 'plannedPickupFrom']} label="с"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'plannedPickupTo']} label="до"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>
@@ -131,7 +133,7 @@ function CargoCard({ name, restField, onRemove, form, tariffMap, scope }: { name
       {mode === 'TARIFF' && (
         <Space direction="vertical" size={4} style={{ marginBottom: 8 }}>
           <Form.Item {...restField} name={[name, 'discount']} label="Скидка, ₽" style={{ marginBottom: 4 }}><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
-          <TariffPreview tariff={tariffMap[locId]} pallets={pallets} discount={discount} scope={scope} />
+          {locId ? <TariffPreview tariff={tariffMap[locId]} pallets={pallets} discount={discount} scope={scope} /> : <Typography.Text type="secondary">Выберите получателя выше для расчёта тарифа</Typography.Text>}
         </Space>
       )}
       <Divider titlePlacement="left" style={{ margin: '8px 0' }}>Плечи маршрута</Divider>
@@ -155,6 +157,7 @@ function CargoCard({ name, restField, onRemove, form, tariffMap, scope }: { name
 export default function RequestsPage() {
   const { can } = usePermissions();
   const canWrite = can('trips.write');
+  const searchParams = useSearchParams();
 
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,6 +169,7 @@ export default function RequestsPage() {
   const [fCustomer, setFCustomer] = useState<string>();
   const [fVertical, setFVertical] = useState<string>();
   const [fRange, setFRange] = useState<any>(null);
+  const [fDeliveryRange, setFDeliveryRange] = useState<any>(null);
 
   // шаблоны
   const [templates, setTemplates] = useState<any[]>([]);
@@ -217,14 +221,35 @@ export default function RequestsPage() {
       if (fStatus) filters.status = fStatus;
       if (fCustomer) filters.customerId = fCustomer;
       if (fVertical) filters.verticalCode = fVertical;
-      if (fRange?.[0]) filters.dateFrom = fRange[0].startOf('day').toISOString();
-      if (fRange?.[1]) filters.dateTo = fRange[1].endOf('day').toISOString();
+      // Если выбрана одна дата — точное совпадение (from=startOfDay, to=endOfDay той же даты)
+      const pickupFrom = fRange?.[0] ?? fRange?.[1];
+      const pickupTo = fRange?.[1] ?? fRange?.[0];
+      if (pickupFrom) filters.dateFrom = pickupFrom.startOf('day').toISOString();
+      if (pickupTo) filters.dateTo = pickupTo.endOf('day').toISOString();
+
+      const deliveryFrom = fDeliveryRange?.[0] ?? fDeliveryRange?.[1];
+      const deliveryTo = fDeliveryRange?.[1] ?? fDeliveryRange?.[0];
+      if (deliveryFrom) filters.deliveryFrom = deliveryFrom.startOf('day').toISOString();
+      if (deliveryTo) filters.deliveryTo = deliveryTo.endOf('day').toISOString();
       setData(await getRequests(filters));
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [fStatus, fCustomer, fVertical, fRange]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [fStatus, fCustomer, fVertical, fRange, fDeliveryRange]);
   const loadTemplates = async () => setTemplates(await getRequestTemplates());
   useEffect(() => { loadTemplates(); }, []);
+
+  // Автооткрытие шаблона из ?editTemplate=<id> (переход со страницы шаблонов)
+  const editTemplateApplied = useRef(false);
+  useEffect(() => {
+    const tplId = searchParams.get('editTemplate');
+    if (!tplId || editTemplateApplied.current || templates.length === 0) return;
+    editTemplateApplied.current = true;
+    setEditing(null); setSelTemplate(undefined); form.resetFields();
+    form.setFieldsValue({ requestDate: dayjs(), cargoes: [] });
+    setOpen(true);
+    applyTemplate(tplId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, templates]);
 
   const refreshView = async (id: string) => setViewReq(await getRequest(id));
 
@@ -288,6 +313,7 @@ export default function RequestsPage() {
     legs: (c.legs || []).map((l: any) => ({
       pickupLocationId: l.pickupLocationId ?? undefined,
       dropoffLocationId: l.dropoffLocationId ?? undefined,
+      directionId: l.directionId ?? undefined,
       plannedPickupDate: l.plannedPickup ? new Date(l.plannedPickup).toISOString() : null,
       plannedPickupFrom: l.plannedPickup ? new Date(l.plannedPickup).toISOString() : null,
       plannedPickupTo: l.plannedPickupTo || null,
@@ -515,11 +541,12 @@ export default function RequestsPage() {
 
   return (
     <>
-      <FilterBar onReset={() => { setFStatus(undefined); setFCustomer(undefined); setFVertical(undefined); setFRange(null); }}>
+      <FilterBar onReset={() => { setFStatus(undefined); setFCustomer(undefined); setFVertical(undefined); setFRange(null); setFDeliveryRange(null); }}>
         <Select placeholder="Статус" allowClear style={{ width: 170 }} value={fStatus} onChange={setFStatus} options={Object.entries(statusCfg).map(([v, c]) => ({ value: v, label: c.label }))} />
         <CustomerSelect placeholder="Заявитель" style={{ width: 200 }} value={fCustomer} onChange={setFCustomer} />
         <VerticalSelect placeholder="Вертикаль" style={{ width: 180 }} value={fVertical} onChange={setFVertical} />
-        <DatePicker.RangePicker value={fRange} onChange={setFRange} format="DD.MM.YYYY" />
+        <DatePicker.RangePicker value={fRange} onChange={setFRange} onCalendarChange={setFRange} format="DD.MM.YYYY" placeholder={['Отправка с', 'Отправка по']} />
+        <DatePicker.RangePicker value={fDeliveryRange} onChange={setFDeliveryRange} onCalendarChange={setFDeliveryRange} format="DD.MM.YYYY" placeholder={['Доставка с', 'Доставка по']} />
       </FilterBar>
 
       <DataTable title="Заявки на перевозку" data={data} columns={columns} loading={loading} scrollX={1100}
@@ -615,7 +642,7 @@ export default function RequestsPage() {
           {cargoMode === 'TARIFF' && (
             <Space direction="vertical" size={4} style={{ marginBottom: 8 }}>
               <Form.Item name="discount" label="Скидка, ₽" style={{ marginBottom: 4 }}><InputNumber min={0} style={{ width: 120 }} /></Form.Item>
-              <TariffPreview tariff={tariffMap[cargoLocId]} pallets={cargoPallets} discount={cargoDiscount} scope={perTripScope} />
+              {cargoLocId ? <TariffPreview tariff={tariffMap[cargoLocId]} pallets={cargoPallets} discount={cargoDiscount} scope={perTripScope} /> : <Typography.Text type="secondary">Выберите получателя выше для расчёта тарифа</Typography.Text>}
             </Space>
           )}
           <Divider titlePlacement="left" style={{ margin: '8px 0' }}>Плечи маршрута</Divider>

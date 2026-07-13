@@ -10,7 +10,7 @@ import {
   getVehicleTypeOptions,
   getVehicleOptions,
   getDriverOptions,
-  getRouteOptions,
+  getDirectionOptions,
 } from '@/lib/actions/references';
 import { getCustomerContractOptions, getCarrierContractOptions } from '@/lib/actions/contracts';
 
@@ -44,8 +44,8 @@ export function DriverSelect(props: BaseProps) {
   return <AsyncSelect placeholder="Водитель" fetchOptions={() => getDriverOptions()} {...props} />;
 }
 
-export function RouteSelect(props: BaseProps) {
-  return <AsyncSelect placeholder="Маршрут" fetchOptions={() => getRouteOptions()} {...props} />;
+export function DirectionSelect(props: BaseProps) {
+  return <AsyncSelect placeholder="Направление" fetchOptions={() => getDirectionOptions()} {...props} />;
 }
 
 export function CustomerContractSelect(props: BaseProps) {

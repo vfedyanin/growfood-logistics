@@ -2,8 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { Button, Form, Input, Select, Switch, DatePicker, Space, Popconfirm, Tag, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { useRouter } from 'next/navigation';
 import DataTable from '@/components/DataTable';
 import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -25,6 +26,7 @@ const vatOptions = [
 export default function CarrierContractsPage() {
   const { can } = usePermissions();
   const w = can('references.write');
+  const router = useRouter();
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -61,15 +63,18 @@ export default function CarrierContractsPage() {
     { title: 'по', dataIndex: 'validTo', key: 'validTo', render: fmt, responsive: ['lg'] as any },
     { title: 'Активен', dataIndex: 'isActive', key: 'isActive', render: (v: boolean) => v ? <Tag color="green">Да</Tag> : <Tag>Нет</Tag> },
     {
-      title: 'Действия', key: 'actions', width: 110,
-      render: (_: any, r: any) => w ? (
+      title: 'Действия', key: 'actions', width: 130,
+      render: (_: any, r: any) => (
         <Space>
-          <Button type="link" icon={<EditOutlined />} onClick={() => onEdit(r)} />
-          <Popconfirm title="Удалить?" onConfirm={() => onDelete(r.id)}>
-            <Button type="link" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          <Button type="link" icon={<EyeOutlined />} onClick={() => router.push(`/references/carrier-contracts/${r.id}`)} title="Открыть карточку" />
+          {w && <Button type="link" icon={<EditOutlined />} onClick={() => onEdit(r)} title="Редактировать" />}
+          {w && (
+            <Popconfirm title="Удалить?" onConfirm={() => onDelete(r.id)}>
+              <Button type="link" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          )}
         </Space>
-      ) : null,
+      ),
     },
   ];
 

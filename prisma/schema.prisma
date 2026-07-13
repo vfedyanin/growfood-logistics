@@ -116,8 +116,6 @@ model Location {
   createdById String?
   updatedById String?
 
-  routesAsOrigin      Route[]           @relation("RouteOrigin")
-  routesAsDestination Route[]           @relation("RouteDestination")
   tripsAsOrigin       Trip[]            @relation("TripOrigin")
   tripsAsDestination  Trip[]            @relation("TripDestination")
   customerDeliveries  CustomerDeliveryLocation[]
@@ -127,7 +125,9 @@ model Location {
   requestsAsDelivery  CustomerRequest[] @relation("ReqDelivery")
   reqLegAsPickup      RequestCargoLeg[] @relation("RCLPickup")
   reqLegAsDropoff     RequestCargoLeg[] @relation("RCLDropoff")
-  reqCargoAsConsignee RequestCargo[]    @relation("RCConsigneeLocation")
+  reqCargoAsConsignee     RequestCargo[]    @relation("RCConsigneeLocation")
+  directionsAsOrigin      Direction[]       @relation("DirectionOrigin")
+  directionsAsDestination Direction[]       @relation("DirectionDestination")
 }
 
 enum LocationType {
@@ -366,7 +366,7 @@ model Tariff {
   id                 String       @id @default(cuid())
   customerContractId String?
   carrierContractId  String?
-  routeId            String?
+  directionId        String?      @map("routeId")
   vehicleTypeCode    String?
   tariffType         TariffMethod @default(PER_PALLET)
   pricePerTrip       Decimal?     @db.Decimal(12, 2)
@@ -382,7 +382,7 @@ model Tariff {
 
   customerContract CustomerContract? @relation("CustContractTariff", fields: [customerContractId], references: [id])
   carrierContract  CarrierContract?  @relation("CarrContractTariff", fields: [carrierContractId], references: [id])
-  route            Route?            @relation(fields: [routeId], references: [id])
+  direction        Direction?        @relation(fields: [directionId], references: [id])
   vehicleType      VehicleType?      @relation(fields: [vehicleTypeCode], references: [code])
   tiers            TariffTier[]
 }
@@ -399,7 +399,7 @@ model TariffTier {
 
 model MarketPrice {
   id              String    @id @default(cuid())
-  routeId         String
+  directionId     String    @map("routeId")
   vehicleTypeCode String
   pricePerTrip    Decimal?  @db.Decimal(12, 2)
   pricePerPallet  Decimal?  @db.Decimal(12, 2)
@@ -412,40 +412,35 @@ model MarketPrice {
   createdById     String?
   updatedById     String?
 
-  route       Route       @relation(fields: [routeId], references: [id])
+  direction   Direction   @relation(fields: [directionId], references: [id])
   vehicleType VehicleType @relation(fields: [vehicleTypeCode], references: [code])
 }
 
 // ============================================================
-//  МАРШРУТЫ
+//  НАПРАВЛЕНИЯ
 // ============================================================
 
-model Route {
-  id             String    @id @default(cuid())
-  code           String    @unique
-  name           String?
-  originId       String
-  destinationId  String
-  distanceKm     Decimal?  @db.Decimal(10, 2)
-  estimatedHours Decimal?  @db.Decimal(5, 2)
-  routeType      RouteType
-  isActive       Boolean   @default(true)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  createdById    String?
-  updatedById    String?
+model Direction {
+  id            String    @id @default(cuid())
+  code          String    @unique
+  name          String?
+  distanceKm    Decimal?  @db.Decimal(10, 2)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  createdById   String?
+  updatedById   String?
+  originId      String?
+  destinationId String?
 
-  origin       Location      @relation("RouteOrigin", fields: [originId], references: [id])
-  destination  Location      @relation("RouteDestination", fields: [destinationId], references: [id])
-  trips        Trip[]
-  tariffs      Tariff[]
-  marketPrices MarketPrice[]
-}
+  origin        Location?  @relation("DirectionOrigin", fields: [originId], references: [id])
+  destination   Location?  @relation("DirectionDestination", fields: [destinationId], references: [id])
+  trips         Trip[]
+  tariffs       Tariff[]
+  marketPrices  MarketPrice[]
+  legs          RequestCargoLeg[]
 
-enum RouteType {
-  DIRECT
-  HUB
-  MILK_RUN
+  @@map("Route")
 }
 
 // ============================================================
@@ -457,7 +452,7 @@ model Trip {
   tripNumber       String     @unique
   tripType         TripType
   verticalCode     String?
-  routeId          String?
+  directionId      String?  @map("routeId")
   originId         String?
   destinationId    String?
   vehicleTypeCode  String?
@@ -484,8 +479,8 @@ model Trip {
   createdById      String?
   updatedById      String?
 
-  vertical    Vertical? @relation(fields: [verticalCode], references: [code])
-  route       Route?    @relation(fields: [routeId], references: [id])
+  vertical    Vertical?   @relation(fields: [verticalCode], references: [code])
+  direction   Direction?  @relation(fields: [directionId], references: [id])
   origin       Location?    @relation("TripOrigin", fields: [originId], references: [id])
   destination  Location?    @relation("TripDestination", fields: [destinationId], references: [id])
   vehicleType  VehicleType? @relation("TripVehicleType", fields: [vehicleTypeCode], references: [code])
@@ -984,6 +979,7 @@ model RequestCargoLeg {
   discount          Decimal?  @db.Decimal(12, 2)
   finalCost         Decimal?  @db.Decimal(12, 2)
   tripCargoUnitId   String?   @unique
+  directionId       String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   createdById       String?
@@ -993,6 +989,7 @@ model RequestCargoLeg {
   pickupLocation  Location?      @relation("RCLPickup", fields: [pickupLocationId], references: [id])
   dropoffLocation Location?      @relation("RCLDropoff", fields: [dropoffLocationId], references: [id])
   tripCargoUnit   TripCargoUnit? @relation(fields: [tripCargoUnitId], references: [id])
+  direction       Direction?     @relation(fields: [directionId], references: [id])
 
   @@index([requestCargoId])
 }

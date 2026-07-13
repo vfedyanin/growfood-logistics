@@ -27,6 +27,7 @@ function legCreateData(l: any, order: number, actor: string | null) {
     legOrder: order,
     pickupLocationId: l.pickupLocationId || null,
     dropoffLocationId: l.dropoffLocationId || null,
+    directionId: l.directionId || null,
     plannedPickup: l.plannedPickup ? new Date(l.plannedPickup) : null,
     plannedPickupTo: l.plannedPickupTo || null,
     plannedDropoff: l.plannedDropoff ? new Date(l.plannedDropoff) : null,
@@ -72,7 +73,7 @@ function cargoCreateData(c: any, actor: string | null) {
   };
 }
 // Карта тарифов контрагента по точкам доставки: locationId → TariffInfo
-// Смотрит в CustomerContract → Tariff → Route.destinationId (с учётом даты)
+// ARCH_BACKLOG: Direction не содержит destinationId — тарифная карта по локациям временно не реализована
 async function getCustomerTariffMap(customerId: string, requestDate?: Date) {
   const date = requestDate || new Date();
   const map = new Map<string, TariffInfo>();
@@ -84,23 +85,7 @@ async function getCustomerTariffMap(customerId: string, requestDate?: Date) {
   const contractIds = contracts.map((c) => c.id);
 
   if (contractIds.length) {
-    const tariffs = await prisma.tariff.findMany({
-      where: {
-        customerContractId: { in: contractIds },
-        validFrom: { lte: date },
-        OR: [{ validTo: null }, { validTo: { gte: date } }],
-      },
-      include: {
-        route: { select: { destinationId: true } },
-        tiers: { include: { vehicleType: { select: { capacityPallets: true } } } },
-      },
-      orderBy: { validFrom: 'desc' },
-    });
-    for (const t of tariffs) {
-      if (!t.route?.destinationId) continue;
-      if (map.has(t.route.destinationId)) continue;
-      map.set(t.route.destinationId, toTariffInfo(t));
-    }
+    // Direction больше не содержит destinationId — тарифная карта по локациям временно недоступна (ARCH_BACKLOG)
   }
 
   // Резервный фолбэк: CustomerDeliveryLocation (legacy, сейчас пустая)
@@ -154,23 +139,54 @@ async function recomputeRequestFinals(requestId: string) {
 }
 
 // ============ List / Get ============
-export async function getRequests(filters?: { status?: RequestStatus; customerId?: string; verticalCode?: string; dateFrom?: string; dateTo?: string }) {
+export async function getRequests(filters?: { status?: RequestStatus; customerId?: string; verticalCode?: string; dateFrom?: string; dateTo?: string; deliveryFrom?: string; deliveryTo?: string }) {
   await requireAuth();
   const where: any = {};
   if (filters?.status) where.status = filters.status;
   if (filters?.customerId) where.customerId = filters.customerId;
   if (filters?.verticalCode) where.verticalCode = filters.verticalCode;
-  if (filters?.dateFrom || filters?.dateTo) {
-    where.requestDate = {};
-    if (filters.dateFrom) where.requestDate.gte = new Date(filters.dateFrom);
-    if (filters.dateTo) where.requestDate.lte = new Date(filters.dateTo);
-  }
   const result = await prisma.customerRequest.findMany({
     where,
     include: { ...reqInclude, cargoes: { include: cargoInclude }, invoices: true },
     orderBy: { createdAt: 'desc' },
   });
-  return serialize(result);
+  let rows = serialize(result);
+
+  // Фильтр по min(plannedPickup) — жёсткий AND, точный min/max в памяти
+  if (filters?.dateFrom || filters?.dateTo) {
+    const from = filters.dateFrom ? new Date(filters.dateFrom).getTime() : null;
+    const to = filters.dateTo ? new Date(filters.dateTo).getTime() : null;
+    rows = rows.filter((r: any) => {
+      const pickups = (r.cargoes || [])
+        .flatMap((c: any) => (c.legs || []).map((l: any) => l.plannedPickup))
+        .filter(Boolean)
+        .map((d: string) => new Date(d).getTime());
+      if (!pickups.length) return false;
+      const min = Math.min(...pickups);
+      if (from !== null && min < from) return false;
+      if (to !== null && min > to) return false;
+      return true;
+    });
+  }
+
+  // Фильтр по max(plannedDropoff) — жёсткий AND поверх предыдущего
+  if (filters?.deliveryFrom || filters?.deliveryTo) {
+    const from = filters.deliveryFrom ? new Date(filters.deliveryFrom).getTime() : null;
+    const to = filters.deliveryTo ? new Date(filters.deliveryTo).getTime() : null;
+    rows = rows.filter((r: any) => {
+      const dropoffs = (r.cargoes || [])
+        .flatMap((c: any) => (c.legs || []).map((l: any) => l.plannedDropoff))
+        .filter(Boolean)
+        .map((d: string) => new Date(d).getTime());
+      if (!dropoffs.length) return false;
+      const max = Math.max(...dropoffs);
+      if (from !== null && max < from) return false;
+      if (to !== null && max > to) return false;
+      return true;
+    });
+  }
+
+  return rows;
 }
 
 export async function getRequest(id: string) {

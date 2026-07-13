@@ -94,8 +94,8 @@ async function main() {
     const originId = locId[r.originCode];
     const destinationId = locId[r.destinationCode];
     if (!originId || !destinationId) throw new Error(`Маршрут ${r.code}: не найдена локация (${r.originCode} / ${r.destinationCode})`);
-    const data = { name: r.name, originId, destinationId, distanceKm: r.distanceKm, estimatedHours: r.estimatedHours, routeType: r.routeType, isActive: r.isActive };
-    await prisma.route.upsert({
+    const data = { name: r.name, originId, destinationId, distanceKm: r.distanceKm, isActive: r.isActive };
+    await prisma.direction.upsert({
       where: { code: r.code },
       update: data,
       create: { code: r.code, ...data },
