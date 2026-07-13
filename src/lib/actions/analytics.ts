@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { requireAuth, tripTypeScopeFor } from '@/lib/authz';
+import { toTariffInfo, tariffPrice } from '@/lib/tariff';
 
 export type DashboardFilters = {
   dateFrom?: string;
@@ -40,7 +41,13 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
       },
     }),
     prisma.marketPrice.findMany(),
-    prisma.tariff.findMany({ include: { carrierContract: { select: { carrierId: true } } } }),
+    prisma.tariff.findMany({
+      where: { carrierContractId: { not: null } },
+      include: {
+        carrierContract: { select: { carrierId: true } },
+        tiers: { include: { vehicleType: { select: { capacityPallets: true } } } },
+      },
+    }),
   ]);
 
   // ===== Хелперы «факт, иначе план» =====
@@ -60,6 +67,8 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
     arr.push(tar);
     tIdx.set(k, arr);
   }
+  // Себестоимость рейса по тарифу перевозчика: матч carrierId+тип ТС, приоритет по маршруту
+  // и сроку действия, затем цена через единый хелпер (уважает tariffType и тиры по вместимости).
   const tariffCost = (t: any): number => {
     const cid = t.carrierId; const vt = effVtCode(t);
     if (!cid || !vt) return 0;
@@ -256,13 +265,50 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
     const share = totalW > 0 ? myW / totalW : (units.length ? 1 / units.length : 0);
     return tariffCost(trip) * share;
   };
+  // Выручка = клиентский прайс: CustomerContract → Tariff → Route.destinationId, матч по
+  // плательщику (сторона договора или участник группы) и точке доставки груза.
+  // Считаем live по актуальным тарифам, а не по снимку RequestCargo.finalCost (он может быть пуст).
+  const clientTariffsRaw = await prisma.tariff.findMany({
+    where: { customerContractId: { not: null } },
+    include: {
+      customerContract: { select: { customerId: true, members: { select: { customerId: true } } } },
+      route: { select: { destinationId: true } },
+      tiers: { include: { vehicleType: { select: { capacityPallets: true } } } },
+    },
+    orderBy: { validFrom: 'desc' },
+  });
+  const clientTIdx = new Map<string, any[]>(); // `${partyId}|${destinationId}` → тарифы
+  for (const t of clientTariffsRaw) {
+    const dest = t.route?.destinationId;
+    if (!dest) continue;
+    const parties = new Set<string>();
+    if (t.customerContract?.customerId) parties.add(t.customerContract.customerId);
+    for (const m of t.customerContract?.members || []) parties.add(m.customerId);
+    for (const pid of Array.from(parties)) {
+      const k = `${pid}|${dest}`;
+      const arr = clientTIdx.get(k) || [];
+      arr.push(t);
+      clientTIdx.set(k, arr);
+    }
+  }
+  const clientRevenue = (partyId: string | null, dest: string | null, date: Date, pallets: number): number => {
+    if (!partyId || !dest) return 0;
+    const cands = clientTIdx.get(`${partyId}|${dest}`);
+    if (!cands || !cands.length) return 0;
+    const valid = cands.filter((x) => x.validFrom <= date && (x.validTo == null || x.validTo >= date));
+    const pick = (valid.length ? valid : cands)[0];
+    return pick ? tariffPrice(toTariffInfo(pick), pallets) : 0;
+  };
+
   const payerMap = new Map<string, { payer: string; revenue: number; cost: number }>();
   for (const c of laasCargo) {
-    const payer = c.request.payer?.name || c.request.customer?.name || '—';
-    const e = payerMap.get(payer) || { payer, revenue: 0, cost: 0 };
-    e.revenue += num(c.finalCost);
+    const payerId = c.request.payerId || c.request.customerId || '—';
+    const payerName = c.request.payer?.name || c.request.customer?.name || '—';
+    const date = c.request.requestDate || new Date();
+    const e = payerMap.get(payerId) || { payer: payerName, revenue: 0, cost: 0 };
+    e.revenue += clientRevenue(c.request.payerId || c.request.customerId, c.consigneeLocationId, date, num(c.pallets));
     e.cost += c.legs.reduce((s, l) => s + legCost(l), 0);
-    payerMap.set(payer, e);
+    payerMap.set(payerId, e);
   }
   const laasProfitability = Array.from(payerMap.values())
     .map((e) => ({
