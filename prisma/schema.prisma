@@ -128,6 +128,8 @@ model Location {
   reqCargoAsConsignee     RequestCargo[]    @relation("RCConsigneeLocation")
   directionsAsOrigin      Direction[]       @relation("DirectionOrigin")
   directionsAsDestination Direction[]       @relation("DirectionDestination")
+  tariffsAsOrigin         Tariff[]          @relation("TariffOrigin")
+  tariffsAsDestination    Tariff[]          @relation("TariffDestination")
 }
 
 enum LocationType {
@@ -380,10 +382,15 @@ model Tariff {
   createdById        String?
   updatedById        String?
 
-  customerContract CustomerContract? @relation("CustContractTariff", fields: [customerContractId], references: [id])
-  carrierContract  CarrierContract?  @relation("CarrContractTariff", fields: [carrierContractId], references: [id])
-  direction        Direction?        @relation(fields: [directionId], references: [id])
-  vehicleType      VehicleType?      @relation(fields: [vehicleTypeCode], references: [code])
+  originLocationId      String?
+  destinationLocationId String?
+
+  customerContract    CustomerContract? @relation("CustContractTariff", fields: [customerContractId], references: [id])
+  carrierContract     CarrierContract?  @relation("CarrContractTariff", fields: [carrierContractId], references: [id])
+  direction           Direction?        @relation(fields: [directionId], references: [id])
+  vehicleType         VehicleType?      @relation(fields: [vehicleTypeCode], references: [code])
+  originLocation      Location?         @relation("TariffOrigin", fields: [originLocationId], references: [id])
+  destinationLocation Location?         @relation("TariffDestination", fields: [destinationLocationId], references: [id])
   tiers            TariffTier[]
 }
 
