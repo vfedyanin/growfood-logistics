@@ -27,7 +27,10 @@ export async function getTrips(filters?: {
   tripType?: 'OWN' | 'LAAS' | 'CONSOLIDATED';
   dateFrom?: string;
   dateTo?: string;
+  endDateFrom?: string;
+  endDateTo?: string;
   carrierId?: string;
+  directionId?: string;
   shipperId?: string;
   consigneeId?: string;
   payerId?: string;
@@ -38,6 +41,7 @@ export async function getTrips(filters?: {
   if (filters?.status) where.status = filters.status;
   if (filters?.tripType) where.tripType = filters.tripType;
   if (filters?.carrierId) where.carrierId = filters.carrierId;
+  if (filters?.directionId) where.directionId = filters.directionId;
   if (filters?.shipperId) where.shipperId = filters.shipperId;
   if (filters?.consigneeId) where.consigneeId = filters.consigneeId;
   if (filters?.payerId) where.payerId = filters.payerId;
@@ -45,6 +49,11 @@ export async function getTrips(filters?: {
     where.plannedDeparture = {};
     if (filters.dateFrom) where.plannedDeparture.gte = new Date(filters.dateFrom);
     if (filters.dateTo) where.plannedDeparture.lte = new Date(filters.dateTo);
+  }
+  if (filters?.endDateFrom || filters?.endDateTo) {
+    where.plannedArrival = {};
+    if (filters.endDateFrom) where.plannedArrival.gte = new Date(filters.endDateFrom);
+    if (filters.endDateTo) where.plannedArrival.lte = new Date(filters.endDateTo);
   }
   const result = await prisma.trip.findMany({
     where,
@@ -116,6 +125,7 @@ export async function createTrip(input: any) {
         : undefined,
     },
   });
+  await tryAutoCalcEconomics(trip.id);
   revalidatePath('/operations/trips');
   return trip;
 }
@@ -137,6 +147,7 @@ export async function updateTrip(id: string, input: any) {
     });
   }
   await recalcAllocation(id);
+  await tryAutoCalcEconomics(id);
   revalidatePath('/operations/trips');
   return prisma.trip.findUnique({ where: { id } });
 }
@@ -147,6 +158,39 @@ export async function deleteTrip(id: string) {
   await prisma.qualityEvent.deleteMany({ where: { tripId: id } });
   await prisma.trip.delete({ where: { id } });
   revalidatePath('/operations/trips');
+}
+
+// Авто-расчёт себестоимости при сохранении (без броска, только если есть перевозчик + тип ТС)
+async function tryAutoCalcEconomics(tripId: string) {
+  try {
+    const trip = await prisma.trip.findUnique({
+      where: { id: tripId },
+      include: { direction: true, vehicle: { include: { vehicleType: true } }, cargoUnits: { select: { pallets: true } } },
+    });
+    if (!trip?.carrierId) return;
+    const vtCode = trip.vehicle?.vehicleTypeCode ?? trip.vehicleTypeCode;
+    if (!vtCode) return;
+    const date = trip.plannedDeparture || trip.actualDeparture || new Date();
+    const where: any = {
+      carrierContract: { carrierId: trip.carrierId },
+      vehicleTypeCode: vtCode,
+      validFrom: { lte: date },
+      AND: [{ OR: [{ validTo: null }, { validTo: { gte: date } }] }],
+    };
+    if (trip.directionId) where.AND.push({ OR: [{ directionId: trip.directionId }, { directionId: null }] });
+    const tariffs = await prisma.tariff.findMany({ where, orderBy: { validFrom: 'desc' } });
+    const chosen = (trip.directionId && tariffs.find((t) => t.directionId === trip.directionId)) || tariffs.find((t) => t.directionId == null) || tariffs[0];
+    if (!chosen) return;
+    const pallets = trip.actualPallets ?? trip.plannedPallets ?? trip.cargoUnits.reduce((s, c) => s + (c.pallets || 0), 0);
+    const km = trip.direction?.distanceKm ? Number(trip.direction.distanceKm) : 0;
+    let cost = 0;
+    if (chosen.pricePerTrip != null) cost = Number(chosen.pricePerTrip);
+    else if (chosen.pricePerPallet != null) cost = Number(chosen.pricePerPallet) * pallets;
+    else if (chosen.pricePerKm != null) cost = Number(chosen.pricePerKm) * km;
+    else return;
+    await prisma.trip.update({ where: { id: tripId }, data: { actualCost: Number(cost.toFixed(2)) } });
+    await recalcAllocation(tripId);
+  } catch { /* тихо */ }
 }
 
 // ============ Аллокация стоимости по лоткам ============
@@ -325,8 +369,8 @@ export async function calculateTripEconomics(tripId: string) {
   });
   if (!trip) throw new Error('Рейс не найден');
   if (!trip.carrierId) throw new Error('У рейса не указан перевозчик');
-  const vtCode = trip.vehicle?.vehicleTypeCode;
-  if (!vtCode) throw new Error('У рейса не указано ТС — нужен тип ТС для подбора тарифа');
+  const vtCode = trip.vehicle?.vehicleTypeCode ?? trip.vehicleTypeCode;
+  if (!vtCode) throw new Error('У рейса не указан тип ТС — укажите ТС или тип ТС для подбора тарифа');
 
   const date = trip.plannedDeparture || trip.actualDeparture || new Date();
   const where: any = {

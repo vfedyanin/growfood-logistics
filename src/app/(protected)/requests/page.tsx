@@ -354,7 +354,7 @@ export default function RequestsPage() {
       pricingMode: c.pricingMode, cost: c.cost != null ? Number(c.cost) : null, discount: c.discount != null ? Number(c.discount) : null,
       // редактируем только непривязанные плечи
       legs: (c.legs || []).filter((l: any) => !l.tripCargoUnitId).map((l: any) => ({
-        pickupLocationId: l.pickupLocationId, dropoffLocationId: l.dropoffLocationId,
+        pickupLocationId: l.pickupLocationId, dropoffLocationId: l.dropoffLocationId, directionId: l.directionId,
         plannedPickupDate: l.plannedPickup ? dayjs(l.plannedPickup) : null,
         plannedPickupFrom: l.plannedPickup ? dayjs(l.plannedPickup) : null,
         plannedPickupTo: l.plannedPickupTo ? dayjs(l.plannedPickupTo, 'HH:mm') : null,

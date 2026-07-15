@@ -22,6 +22,7 @@ export interface DataTableProps<T> {
   pageSize?: number;
   scrollX?: number;
   size?: TableProps<T>['size'];
+  rowSelection?: TableProps<T>['rowSelection'];
 }
 
 function getByPath(obj: any, path: string): any {
@@ -40,6 +41,7 @@ export default function DataTable<T extends Record<string, any>>({
   pageSize = 20,
   scrollX = 800,
   size = 'middle',
+  rowSelection,
 }: DataTableProps<T>) {
   const [search, setSearch] = useState('');
   const [currentPageSize, setCurrentPageSize] = useState(pageSize);
@@ -90,6 +92,7 @@ export default function DataTable<T extends Record<string, any>>({
         rowKey={rowKey}
         loading={loading}
         size={size}
+        rowSelection={rowSelection}
         scroll={{ x: scrollX }}
         pagination={{
           pageSize: currentPageSize,

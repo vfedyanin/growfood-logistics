@@ -345,6 +345,13 @@ export async function addCargoLegToTrip(legId: string, tripId: string) {
   if (leg.tripCargoUnitId) throw new Error('Плечо уже привязано к рейсу');
   const tcu = await prisma.tripCargoUnit.create({ data: { ...tcuFromCargo(leg.cargo.request, leg.cargo, actor), tripId } });
   await prisma.requestCargoLeg.update({ where: { id: legId }, data: { tripCargoUnitId: tcu.id, updatedById: actor } });
+  if (leg.plannedPickup || leg.plannedDropoff) {
+    const trip = await prisma.trip.findUnique({ where: { id: tripId }, select: { plannedDeparture: true, plannedArrival: true } });
+    const updates: any = {};
+    if (leg.plannedPickup && (!trip?.plannedDeparture || leg.plannedPickup < trip.plannedDeparture)) updates.plannedDeparture = leg.plannedPickup;
+    if (leg.plannedDropoff && (!trip?.plannedArrival || leg.plannedDropoff > trip.plannedArrival)) updates.plannedArrival = leg.plannedDropoff;
+    if (Object.keys(updates).length) await prisma.trip.update({ where: { id: tripId }, data: updates });
+  }
   revalidatePath('/requests'); revalidatePath('/operations/trips'); revalidatePath('/operations/cargo');
 }
 
@@ -443,7 +450,7 @@ export async function getAllTripOptions() {
 }
 
 // ============ Плечи грузов (страница «Груз») ============
-export async function getAllCargoLegs(filters?: { tripId?: string; unassigned?: boolean; customerId?: string; pickupFrom?: string; pickupTo?: string }) {
+export async function getAllCargoLegs(filters?: { tripId?: string; unassigned?: boolean; customerId?: string; pickupFrom?: string; pickupTo?: string; dropoffFrom?: string; dropoffTo?: string }) {
   await requireAuth();
   const where: any = {};
   if (filters?.unassigned) where.tripCargoUnitId = null;
@@ -453,6 +460,11 @@ export async function getAllCargoLegs(filters?: { tripId?: string; unassigned?: 
     where.plannedPickup = {};
     if (filters.pickupFrom) where.plannedPickup.gte = new Date(filters.pickupFrom);
     if (filters.pickupTo) where.plannedPickup.lte = new Date(filters.pickupTo);
+  }
+  if (filters?.dropoffFrom || filters?.dropoffTo) {
+    where.plannedDropoff = {};
+    if (filters.dropoffFrom) where.plannedDropoff.gte = new Date(filters.dropoffFrom);
+    if (filters.dropoffTo) where.plannedDropoff.lte = new Date(filters.dropoffTo);
   }
   return prisma.requestCargoLeg.findMany({
     where,
@@ -467,26 +479,62 @@ export async function getAllCargoLegs(filters?: { tripId?: string; unassigned?: 
 }
 
 // Непривязанные плечи — для привязки из формы/карточки рейса
-export async function getUnassignedCargoLegOptions() {
+export async function getUnassignedCargoLegOptions(filters?: { directionId?: string; date?: string }) {
   await requireAuth();
+  const where: any = { tripCargoUnitId: null };
+  if (filters?.directionId) where.directionId = filters.directionId;
+  if (filters?.date) {
+    const d = new Date(filters.date);
+    where.plannedPickup = {
+      gte: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0),
+      lte: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59),
+    };
+  }
   const rows = await prisma.requestCargoLeg.findMany({
-    where: { tripCargoUnitId: null },
+    where,
     include: { pickupLocation: true, dropoffLocation: true, cargo: { include: { request: { include: { customer: true } } } } },
-    orderBy: { createdAt: 'desc' },
+    orderBy: { plannedPickup: 'asc' },
   });
-  return rows.map((l) => ({
-    value: l.id,
-    label: `${l.cargo.request.requestNumber} · ${l.cargo.request.customer?.name || ''} · ${l.pickupLocation?.name || '—'}→${l.dropoffLocation?.name || '—'} · ${l.cargo.pallets ?? '—'}пал/${l.cargo.traysCount ?? '—'}лот`,
-  }));
+  return rows.map((l) => {
+    const p = l.plannedPickup;
+    const datePrefix = p
+      ? `${String(p.getDate()).padStart(2, '0')}.${String(p.getMonth() + 1).padStart(2, '0')} · `
+      : '';
+    return {
+      value: l.id,
+      label: `${datePrefix}${l.cargo.request.requestNumber} · ${l.cargo.request.customer?.name || ''} · ${l.pickupLocation?.name || '—'}→${l.dropoffLocation?.name || '—'} · ${l.cargo.pallets ?? '—'}пал`,
+    };
+  });
+}
+
+// Лейблы для конкретных плечей по ID (без фильтрации по tripCargoUnitId)
+export async function getCargoLegOptionsByIds(ids: string[]) {
+  await requireAuth();
+  if (!ids.length) return [];
+  const rows = await prisma.requestCargoLeg.findMany({
+    where: { id: { in: ids } },
+    include: { pickupLocation: true, dropoffLocation: true, cargo: { include: { request: { include: { customer: true } } } } },
+  });
+  return rows.map((l) => {
+    const p = l.plannedPickup;
+    const datePrefix = p
+      ? `${String(p.getDate()).padStart(2, '0')}.${String(p.getMonth() + 1).padStart(2, '0')} · `
+      : '';
+    return {
+      value: l.id,
+      label: `${datePrefix}${l.cargo.request.requestNumber} · ${l.cargo.request.customer?.name || ''} · ${l.pickupLocation?.name || '—'}→${l.dropoffLocation?.name || '—'} · ${l.cargo.pallets ?? '—'}пал`,
+    };
+  });
 }
 
 export async function getCargoLegDates(legId: string) {
   await requireAuth();
   const leg = await prisma.requestCargoLeg.findUnique({
     where: { id: legId },
-    select: { plannedPickup: true, plannedDropoff: true },
+    select: { plannedPickup: true, plannedDropoff: true, cargo: { select: { pallets: true } } },
   });
-  return leg;
+  if (!leg) return null;
+  return { plannedPickup: leg.plannedPickup, plannedDropoff: leg.plannedDropoff, pallets: leg.cargo?.pallets ?? null };
 }
 
 export async function unassignCargoLeg(legId: string) {
