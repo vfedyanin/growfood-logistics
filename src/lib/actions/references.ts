@@ -294,6 +294,38 @@ export async function getVehicleTypeOptions() {
   const rows = await prisma.vehicleType.findMany({ orderBy: { name: 'asc' } });
   return rows.map((t) => ({ value: t.code, label: t.name }));
 }
+
+export async function getVehicleTypeOptionsForCarrier(carrierId?: string, directionId?: string) {
+  await requireAuth();
+
+  const now = new Date();
+  const findCodes = async (cId?: string, dId?: string) => {
+    const tariffs = await prisma.tariff.findMany({
+      where: {
+        vehicleTypeCode: { not: null },
+        validFrom: { lte: now },
+        OR: [{ validTo: null }, { validTo: { gte: now } }],
+        ...(cId ? { carrierContract: { carrierId: cId } } : {}),
+        ...(dId ? { directionId: dId } : {}),
+      },
+      select: { vehicleTypeCode: true },
+      distinct: ['vehicleTypeCode'],
+    });
+    return tariffs.map(t => t.vehicleTypeCode!);
+  };
+
+  let codes: string[] = [];
+  if (carrierId && directionId) codes = await findCodes(carrierId, directionId);
+  if (!codes.length && carrierId) codes = await findCodes(carrierId, undefined);
+  if (!codes.length && directionId) codes = await findCodes(undefined, directionId);
+
+  if (!codes.length) {
+    const rows = await prisma.vehicleType.findMany({ orderBy: { name: 'asc' } });
+    return rows.map((t) => ({ value: t.code, label: t.name }));
+  }
+  const rows = await prisma.vehicleType.findMany({ where: { code: { in: codes } }, orderBy: { name: 'asc' } });
+  return rows.map((t) => ({ value: t.code, label: t.name }));
+}
 export async function getVehicleOptions() {
   await requireAuth();
   const rows = await prisma.vehicle.findMany({ where: { isActive: true }, include: { vehicleType: true }, orderBy: { plateNumber: 'asc' } });

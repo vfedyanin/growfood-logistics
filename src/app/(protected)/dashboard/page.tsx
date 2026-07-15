@@ -1,15 +1,16 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Row, Col, Card, Table, Typography, Select, DatePicker, Divider, Spin, Empty } from 'antd';
+import { Row, Col, Card, Table, Typography, Select, DatePicker, Divider, Spin, Empty, Button, Checkbox } from 'antd';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, Legend, CartesianGrid,
 } from 'recharts';
+import dayjs from 'dayjs';
 import FilterBar from '@/components/FilterBar';
 import KpiCard from '@/components/KpiCard';
 import { VerticalSelect, CustomerSelect, CarrierSelect } from '@/components/selects/EntitySelects';
-import { getDashboardMetrics, DashboardFilters } from '@/lib/actions/analytics';
+import { getDashboardMetrics, getDashboardLaasProfitability, DashboardFilters } from '@/lib/actions/analytics';
 
 const { Title, Text } = Typography;
 
@@ -20,10 +21,13 @@ const PIE_COLORS = ['#1677ff', '#52c41a', '#faad14', '#eb2f96', '#13c2c2', '#722
 const rub = (v: number) => v.toLocaleString('ru') + ' ₽';
 
 export default function DashboardPage() {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [m, setM] = useState<any>(null);
+  const [laas, setLaas] = useState<any[] | null>(null);
+  const [laasLoading, setLaasLoading] = useState(false);
+  const [assignedOnly, setAssignedOnly] = useState(false);
 
-  const [range, setRange] = useState<any>(null);
+  const [range, setRange] = useState<any>([dayjs().startOf('month'), dayjs().endOf('month')]);
   const [tripType, setTripType] = useState<string>();
   const [verticalCode, setVerticalCode] = useState<string>();
   const [shipperId, setShipperId] = useState<string>();
@@ -31,18 +35,23 @@ export default function DashboardPage() {
   const [payerId, setPayerId] = useState<string>();
   const [carrierId, setCarrierId] = useState<string>();
 
-  const load = async () => {
+  const load = () => {
+    const f: DashboardFilters = { tripType: tripType as any, verticalCode, shipperId, consigneeId, payerId, carrierId, assignedOnly };
+    if (range?.[0]) f.dateFrom = range[0].startOf('day').toISOString();
+    if (range?.[1]) f.dateTo = range[1].endOf('day').toISOString();
     setLoading(true);
-    try {
-      const f: DashboardFilters = { tripType: tripType as any, verticalCode, shipperId, consigneeId, payerId, carrierId };
-      if (range?.[0]) f.dateFrom = range[0].startOf('day').toISOString();
-      if (range?.[1]) f.dateTo = range[1].endOf('day').toISOString();
-      setM(await getDashboardMetrics(f));
-    } finally { setLoading(false); }
+    getDashboardMetrics(f)
+      .then(setM)
+      .catch((e: any) => console.error('Metrics error:', e))
+      .finally(() => setLoading(false));
+    setLaasLoading(true);
+    getDashboardLaasProfitability(f)
+      .then(setLaas)
+      .catch((e: any) => console.error('LaaS error:', e))
+      .finally(() => setLaasLoading(false));
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [range, tripType, verticalCode, shipperId, consigneeId, payerId, carrierId]);
 
-  const reset = () => { setRange(null); setTripType(undefined); setVerticalCode(undefined); setShipperId(undefined); setConsigneeId(undefined); setPayerId(undefined); setCarrierId(undefined); };
+  const reset = () => { setRange([dayjs().startOf('month'), dayjs().endOf('month')]); setTripType(undefined); setVerticalCode(undefined); setShipperId(undefined); setConsigneeId(undefined); setPayerId(undefined); setCarrierId(undefined); setAssignedOnly(false); setM(null); setLaas(null); };
 
   const section = (title: string) => <Divider titlePlacement="left" style={{ marginTop: 24 }}><b>{title}</b></Divider>;
 
@@ -52,7 +61,7 @@ export default function DashboardPage() {
         <Title level={4} style={{ margin: 0 }}>Дашборд{m ? ` · рейсов: ${m.tripsCount}` : ''}</Title>
       </div>
 
-      <FilterBar onReset={reset}>
+      <FilterBar onReset={reset} extra={<Button type="primary" loading={loading} onClick={load}>Загрузить</Button>}>
         <DatePicker.RangePicker value={range} onChange={setRange} format="DD.MM.YYYY" />
         <Select placeholder="Тип рейса" allowClear style={{ width: 160 }} value={tripType} onChange={setTripType} options={tripTypeOptions} />
         <VerticalSelect placeholder="Вертикаль" style={{ width: 170 }} value={verticalCode} onChange={setVerticalCode} />
@@ -60,10 +69,15 @@ export default function DashboardPage() {
         <CustomerSelect placeholder="Получатель" style={{ width: 170 }} value={consigneeId} onChange={setConsigneeId} />
         <CustomerSelect placeholder="Плательщик" style={{ width: 170 }} value={payerId} onChange={setPayerId} />
         <CarrierSelect placeholder="Перевозчик" style={{ width: 170 }} value={carrierId} onChange={setCarrierId} />
+        <Checkbox checked={assignedOnly} onChange={e => setAssignedOnly(e.target.checked)}>Только распределённые</Checkbox>
       </FilterBar>
 
-      {loading || !m ? (
+      {loading ? (
         <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
+      ) : !m ? (
+        <div style={{ textAlign: 'center', padding: 80, color: '#999' }}>
+          Выберите период и нажмите <b>Загрузить</b>
+        </div>
       ) : (
         <>
           {/* 1. Стоимость */}
@@ -184,8 +198,10 @@ export default function DashboardPage() {
 
           {/* 8. Рентабельность клиентов LaaS */}
           {section('8. Рентабельность клиентов LaaS (по плательщикам)')}
-          {(() => {
-            const lp = m.laasProfitability || [];
+          {laasLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+          ) : (() => {
+            const lp = laas || [];
             const tRev = lp.reduce((s: number, x: any) => s + x.revenue, 0);
             const tCost = lp.reduce((s: number, x: any) => s + x.cost, 0);
             const tProfit = tRev - tCost;

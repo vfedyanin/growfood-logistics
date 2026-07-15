@@ -13,6 +13,7 @@ export type DashboardFilters = {
   consigneeId?: string;
   payerId?: string;
   carrierId?: string;
+  assignedOnly?: boolean;
 };
 
 const num = (v: any) => (v != null ? Number(v) : 0);
@@ -28,6 +29,12 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
   if (filters.consigneeId) where.consigneeId = filters.consigneeId;
   if (filters.payerId) where.payerId = filters.payerId;
   if (filters.carrierId) where.carrierId = filters.carrierId;
+  if (filters.dateFrom || filters.dateTo) {
+    where.plannedDeparture = {
+      ...(filters.dateFrom ? { gte: new Date(filters.dateFrom) } : {}),
+      ...(filters.dateTo ? { lte: new Date(filters.dateTo) } : {}),
+    };
+  }
 
   const [tripsRaw, marketPrices, tariffs] = await Promise.all([
     prisma.trip.findMany({
@@ -227,101 +234,7 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
     perPallet: totalPallets ? +(totalTrays / totalPallets).toFixed(1) : 0,
   };
 
-  // ===== Рентабельность клиентов LaaS по плательщикам =====
-  // Вертикали LaaS: LAAS, LAAS-LTL, LAAS-B2C — матчим по префиксу.
-  const requestFilter: any = { verticalCode: { startsWith: 'LAAS' } };
-  if (filters.payerId) requestFilter.payerId = filters.payerId;
-  if (filters.dateFrom || filters.dateTo) {
-    requestFilter.requestDate = {};
-    if (filters.dateFrom) requestFilter.requestDate.gte = new Date(filters.dateFrom);
-    if (filters.dateTo) requestFilter.requestDate.lte = new Date(filters.dateTo);
-  }
-  const laasCargo = await prisma.requestCargo.findMany({
-    where: { request: requestFilter },
-    include: {
-      request: { include: { payer: true, customer: true } },
-      legs: {
-        include: {
-          tripCargoUnit: {
-            include: {
-              trip: { include: { direction: true, vehicle: { include: { vehicleType: true } }, vehicleType: true, cargoUnits: true } },
-            },
-          },
-        },
-      },
-    },
-  });
-  // Расход по плечу = доля стоимости рейса (факт allocatedCost, иначе по тарифу),
-  // для рейсов в любом статусе кроме CANCELLED. Доля = вес плеча / Σ весов груза рейса.
-  const legCost = (l: any): number => {
-    const tcu = l.tripCargoUnit;
-    if (!tcu) return 0;
-    if (tcu.allocatedCost != null) return num(tcu.allocatedCost);
-    const trip = tcu.trip;
-    if (!trip || trip.status === 'CANCELLED') return 0;
-    const units = trip.cargoUnits || [];
-    const totalW = units.reduce((s: number, u: any) => s + (u.traysCount || u.pallets || 0), 0);
-    const myW = tcu.traysCount || tcu.pallets || 0;
-    const share = totalW > 0 ? myW / totalW : (units.length ? 1 / units.length : 0);
-    return tariffCost(trip) * share;
-  };
-  // Выручка = клиентский прайс: CustomerContract → Tariff → Route.destinationId, матч по
-  // плательщику (сторона договора или участник группы) и точке доставки груза.
-  // Считаем live по актуальным тарифам, а не по снимку RequestCargo.finalCost (он может быть пуст).
-  const clientTariffsRaw = await prisma.tariff.findMany({
-    where: { customerContractId: { not: null } },
-    include: {
-      customerContract: { select: { customerId: true, members: { select: { customerId: true } } } },
-      direction: { select: { destinationId: true } },
-      tiers: { include: { vehicleType: { select: { capacityPallets: true } } } },
-    },
-    orderBy: { validFrom: 'desc' },
-  });
-  const clientTIdx = new Map<string, any[]>(); // `${partyId}|${destinationId}` → тарифы
-  for (const t of clientTariffsRaw) {
-    const dest = (t as any).direction?.destinationId;
-    if (!dest) continue;
-    const parties = new Set<string>();
-    if ((t as any).customerContract?.customerId) parties.add((t as any).customerContract.customerId);
-    for (const m of (t as any).customerContract?.members || []) parties.add(m.customerId);
-    for (const pid of Array.from(parties)) {
-      const k = `${pid}|${dest}`;
-      const arr = clientTIdx.get(k) || [];
-      arr.push(t);
-      clientTIdx.set(k, arr);
-    }
-  }
-  const clientRevenue = (partyId: string | null, dest: string | null, date: Date, pallets: number): number => {
-    if (!partyId || !dest) return 0;
-    const cands = clientTIdx.get(`${partyId}|${dest}`);
-    if (!cands || !cands.length) return 0;
-    const valid = cands.filter((x) => x.validFrom <= date && (x.validTo == null || x.validTo >= date));
-    const pick = (valid.length ? valid : cands)[0];
-    return pick ? tariffPrice(toTariffInfo(pick), pallets) : 0;
-  };
-
-  const payerMap = new Map<string, { payer: string; revenue: number; cost: number }>();
-  for (const c of laasCargo) {
-    const payerId = c.request.payerId || c.request.customerId || '—';
-    const payerName = c.request.payer?.name || c.request.customer?.name || '—';
-    const date = c.request.requestDate || new Date();
-    const e = payerMap.get(payerId) || { payer: payerName, revenue: 0, cost: 0 };
-    e.revenue += clientRevenue(c.request.payerId || c.request.customerId, c.consigneeLocationId, date, num(c.pallets));
-    e.cost += c.legs.reduce((s, l) => s + legCost(l), 0);
-    payerMap.set(payerId, e);
-  }
-  const laasProfitability = Array.from(payerMap.values())
-    .map((e) => ({
-      payer: e.payer,
-      revenue: Math.round(e.revenue),
-      cost: Math.round(e.cost),
-      profit: Math.round(e.revenue - e.cost),
-      marginPct: e.revenue > 0 ? Math.round(((e.revenue - e.cost) / e.revenue) * 100) : null,
-    }))
-    .sort((a, b) => b.revenue - a.revenue);
-
   return {
-    laasProfitability,
     tripsCount,
     cost: { total: Math.round(totalCost), avgPerTrip: Math.round(avgCostPerTrip), totalPallets, marketComparisonPct, byMonth },
     load: { avgPct: Math.round(avgLoadPct), high, mid, low, byType: loadByType },
@@ -331,4 +244,109 @@ export async function getDashboardMetrics(filters: DashboardFilters = {}) {
     byCustomer,
     trays,
   };
+}
+
+export async function getDashboardLaasProfitability(filters: DashboardFilters = {}) {
+  await requireAuth();
+  const requestFilter: any = { verticalCode: { startsWith: 'LAAS' } };
+  if (filters.payerId) requestFilter.payerId = filters.payerId;
+  if (filters.dateFrom || filters.dateTo) {
+    requestFilter.requestDate = {};
+    if (filters.dateFrom) requestFilter.requestDate.gte = new Date(filters.dateFrom);
+    if (filters.dateTo) requestFilter.requestDate.lte = new Date(filters.dateTo);
+  }
+  const cargoFilter: any = { request: requestFilter };
+  if (filters.assignedOnly) cargoFilter.legs = { some: { tripCargoUnitId: { not: null } } };
+  const [laasCargo, carrierTariffs, clientTariffsRaw] = await Promise.all([
+    prisma.requestCargo.findMany({
+      where: cargoFilter,
+      include: {
+        request: { include: { payer: true, customer: true } },
+        legs: {
+          include: {
+            tripCargoUnit: {
+              include: {
+                trip: { include: { direction: true, vehicle: { include: { vehicleType: true } }, vehicleType: true, cargoUnits: true } },
+              },
+            },
+            dropoffLocation: { select: { id: true } },
+          },
+        },
+      },
+    }),
+    prisma.tariff.findMany({
+      where: { carrierContractId: { not: null } },
+      include: { carrierContract: { select: { carrierId: true } }, tiers: { include: { vehicleType: { select: { capacityPallets: true } } } } },
+    }),
+    prisma.tariff.findMany({
+      where: { customerContractId: { not: null } },
+      include: {
+        customerContract: { select: { customerId: true, members: { select: { customerId: true } } } },
+        tiers: { include: { vehicleType: { select: { capacityPallets: true } } } },
+      },
+      orderBy: { validFrom: 'desc' },
+    }),
+  ]);
+  const tIdx = new Map<string, any[]>();
+  for (const tar of carrierTariffs) {
+    const cid = (tar as any).carrierContract?.carrierId;
+    if (!cid) continue;
+    const k = `${cid}|${tar.vehicleTypeCode}`;
+    const arr = tIdx.get(k) || []; arr.push(tar); tIdx.set(k, arr);
+  }
+  const tariffCost = (t: any): number => {
+    const cid = t.carrierId; const vt = t.vehicle?.vehicleTypeCode ?? t.vehicleTypeCode ?? null;
+    if (!cid || !vt) return 0;
+    const cands = tIdx.get(`${cid}|${vt}`); if (!cands?.length) return 0;
+    const date = t.actualArrival ?? t.plannedArrival ?? t.plannedDeparture ?? new Date();
+    const valid = cands.filter((x: any) => x.validFrom <= date && (x.validTo == null || x.validTo >= date));
+    const pool = valid.length ? valid : cands;
+    const pick = (t.directionId && pool.find((x: any) => x.directionId === t.directionId)) || pool.find((x: any) => x.directionId == null) || pool[0];
+    if (!pick) return 0;
+    const pallets = t.actualPallets ?? t.plannedPallets ?? (t.cargoUnits || []).reduce((s: number, c: any) => s + (c.pallets || 0), 0);
+    const km = t.direction?.distanceKm ? Number(t.direction.distanceKm) : 0;
+    if (pick.pricePerTrip != null) return Number(pick.pricePerTrip);
+    if (pick.pricePerPallet != null) return Number(pick.pricePerPallet) * pallets;
+    if (pick.pricePerKm != null) return Number(pick.pricePerKm) * km;
+    return 0;
+  };
+  const legCost = (l: any): number => {
+    const tcu = l.tripCargoUnit; if (!tcu) return 0;
+    if (tcu.allocatedCost != null) return num(tcu.allocatedCost);
+    const trip = tcu.trip; if (!trip || trip.status === 'CANCELLED') return 0;
+    const units = trip.cargoUnits || [];
+    const totalW = units.reduce((s: number, u: any) => s + (u.traysCount || u.pallets || 0), 0);
+    const myW = tcu.traysCount || tcu.pallets || 0;
+    const share = totalW > 0 ? myW / totalW : (units.length ? 1 / units.length : 0);
+    return tariffCost(trip) * share;
+  };
+  const clientTIdx = new Map<string, any[]>();
+  for (const t of clientTariffsRaw) {
+    const dest = (t as any).destinationLocationId; if (!dest) continue;
+    const parties = new Set<string>();
+    if ((t as any).customerContract?.customerId) parties.add((t as any).customerContract.customerId);
+    for (const m of (t as any).customerContract?.members || []) parties.add(m.customerId);
+    for (const pid of Array.from(parties)) { const k = `${pid}|${dest}`; const arr = clientTIdx.get(k) || []; arr.push(t); clientTIdx.set(k, arr); }
+  }
+  const clientRevenue = (partyId: string | null, dest: string | null, date: Date, pallets: number): number => {
+    if (!partyId || !dest) return 0;
+    const cands = clientTIdx.get(`${partyId}|${dest}`); if (!cands?.length) return 0;
+    const valid = cands.filter((x: any) => x.validFrom <= date && (x.validTo == null || x.validTo >= date));
+    const pick = (valid.length ? valid : cands)[0];
+    return pick ? tariffPrice(toTariffInfo(pick), pallets) : 0;
+  };
+  const payerMap = new Map<string, { payer: string; revenue: number; cost: number }>();
+  for (const c of laasCargo) {
+    const payerId = c.request.payerId || c.request.customerId || '—';
+    const payerName = c.request.payer?.name || c.request.customer?.name || '—';
+    const date = c.request.requestDate || new Date();
+    const e = payerMap.get(payerId) || { payer: payerName, revenue: 0, cost: 0 };
+    const deliveryLocId = c.legs.slice().reverse().find((l: any) => l.dropoffLocation?.id)?.dropoffLocation?.id ?? c.consigneeLocationId;
+    e.revenue += clientRevenue(c.request.payerId || c.request.customerId, deliveryLocId, date, num(c.pallets));
+    e.cost += c.legs.reduce((s: number, l: any) => s + legCost(l), 0);
+    payerMap.set(payerId, e);
+  }
+  return Array.from(payerMap.values())
+    .map((e) => ({ payer: e.payer, revenue: Math.round(e.revenue), cost: Math.round(e.cost), profit: Math.round(e.revenue - e.cost), marginPct: e.revenue > 0 ? Math.round(((e.revenue - e.cost) / e.revenue) * 100) : null }))
+    .sort((a, b) => b.revenue - a.revenue);
 }

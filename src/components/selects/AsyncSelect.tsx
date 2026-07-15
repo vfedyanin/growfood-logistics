@@ -19,6 +19,8 @@ export interface AsyncSelectProps extends Omit<SelectProps, 'options' | 'onSearc
   reloadSignal?: number;
   /** Доп. контент внизу выпадающего списка (например, кнопка «+ Добавить»). */
   popupExtra?: React.ReactNode;
+  /** Начальные опции — показываются сразу без запроса (для предзаполненных значений). */
+  initialOptions?: AsyncOption[];
 }
 
 /**
@@ -31,11 +33,20 @@ export default function AsyncSelect({
   debounceMs = 300,
   reloadSignal,
   popupExtra,
+  initialOptions,
   ...rest
 }: AsyncSelectProps) {
-  const [options, setOptions] = useState<AsyncOption[]>([]);
+  const [options, setOptions] = useState<AsyncOption[]>(initialOptions ?? []);
   const [loading, setLoading] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loaded = useRef(false);
+
+  // когда initialOptions приходят позже (асинхронно) — подставляем их, если ещё не загружали
+  useEffect(() => {
+    if (initialOptions?.length && !loaded.current) {
+      setOptions(initialOptions);
+    }
+  }, [initialOptions]);
 
   const load = async (search: string) => {
     setLoading(true);
@@ -46,11 +57,23 @@ export default function AsyncSelect({
     }
   };
 
-  // первичная загрузка + перезагрузка по сигналу
+  // перезагрузка по сигналу (инлайн-создание и т.п.) — грузим сразу
   useEffect(() => {
-    load('');
+    if (reloadSignal !== undefined) {
+      loaded.current = true;
+      load('');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadSignal]);
+
+  // ленивая загрузка — только когда открыли дропдаун первый раз
+  const handleDropdownVisibleChange = (open: boolean) => {
+    if (open && !loaded.current) {
+      loaded.current = true;
+      load('');
+    }
+    rest.onDropdownVisibleChange?.(open);
+  };
 
   const handleSearch = useMemo(
     () => (value: string) => {
@@ -71,6 +94,7 @@ export default function AsyncSelect({
       notFoundContent={loading ? <Spin size="small" /> : undefined}
       loading={loading}
       options={options}
+      onDropdownVisibleChange={handleDropdownVisibleChange}
       popupRender={popupExtra ? (menu) => (
         <>
           {menu}

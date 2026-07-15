@@ -8,10 +8,11 @@ export interface FilterBarProps {
   children: React.ReactNode;
   onReset?: () => void;
   resetLabel?: string;
+  extra?: React.ReactNode;
 }
 
 /** Горизонтальная панель фильтров (даты, селекты, мульти-селекты). */
-export default function FilterBar({ children, onReset, resetLabel = 'Сбросить' }: FilterBarProps) {
+export default function FilterBar({ children, onReset, resetLabel = 'Сбросить', extra }: FilterBarProps) {
   return (
     <div
       style={{
@@ -29,6 +30,7 @@ export default function FilterBar({ children, onReset, resetLabel = 'Сброс�
       <Space wrap size={8} style={{ flex: 1 }}>
         {children}
       </Space>
+      {extra}
       {onReset && (
         <Button icon={<ReloadOutlined />} onClick={onReset}>
           {resetLabel}
