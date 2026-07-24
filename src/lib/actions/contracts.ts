@@ -272,6 +272,8 @@ export async function getCarrierContractDetail(id: string) {
         include: {
           direction: directionWithLocations,
           tiers: { orderBy: { vehicleTypeCode: 'asc' } },
+          originLocation: true,
+          destinationLocation: true,
         },
         orderBy: { validFrom: 'desc' },
       },
