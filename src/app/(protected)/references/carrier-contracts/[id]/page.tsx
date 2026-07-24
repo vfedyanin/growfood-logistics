@@ -25,7 +25,7 @@ interface RouteData { direction: any; dateGroups: DateGroup[] } // dateGroups[0]
 function groupByDirection(tariffs: any[]): RouteData[] {
   const byDir = new Map<string, { direction: any; byDate: Map<string, any[]> }>();
   for (const t of tariffs) {
-    const rk = t.directionId || '__no_dir__';
+    const rk = t.directionId || (t.originLocationId ? `${t.originLocationId}_${t.destinationLocationId || ''}` : '__no_dir__');
     if (!byDir.has(rk)) byDir.set(rk, { direction: t.direction, byDate: new Map() });
     const entry = byDir.get(rk)!;
     const dk = dayjs(t.validFrom).format('YYYY-MM-DD');
@@ -89,8 +89,8 @@ export default function CarrierContractDetailPage() {
     const isTrip = group.tariffs.some((t: any) => t.vehicleTypeCode && t.pricePerTrip != null);
     setTariffMode(isTrip ? 'trip' : 'pallet');
     const vals: any = {
-      originId: group.direction?.originId ?? null,
-      destinationId: group.direction?.destinationId ?? null,
+      originId: group.direction?.originId ?? group.tariffs[0]?.originLocationId ?? null,
+      destinationId: group.direction?.destinationId ?? group.tariffs[0]?.destinationLocationId ?? null,
       directionId: group.direction?.id ?? null,
       validFrom: dayjs(group.tariffs[0].validFrom),
     };
@@ -263,8 +263,8 @@ export default function CarrierContractDetailPage() {
                       <td style={tdDate}>
                         <Tag color="blue" style={{ fontSize: 11, fontWeight: 600, margin: 0 }}>{fmt(dg.validFrom)}</Tag>
                       </td>
-                      <td style={tdL}>{direction?.origin?.name || '—'}</td>
-                      <td style={tdL}>{direction?.destination?.name || '—'}</td>
+                      <td style={tdL}>{direction?.origin?.name || dg.tariffs[0]?.originLocation?.name || '—'}</td>
+                      <td style={tdL}>{direction?.destination?.name || dg.tariffs[0]?.destinationLocation?.name || '—'}</td>
                       <td style={tdL}>{direction?.name || direction?.code || '—'}</td>
                       {hasPalletCur && <td style={td}>{!hasTripRows ? <PalletCell val={palletPrice} /> : <span style={{ color: '#e0e0e0' }}>—</span>}</td>}
                       {curVtList.map((vt: any) => <td key={vt.code} style={td}><PriceCell val={vtMap[vt.code]} /></td>)}
@@ -322,8 +322,8 @@ export default function CarrierContractDetailPage() {
                         <tr key={ri} style={{ borderBottom: '1px solid #f5f5f5', background: '#fafafa' }}>
                           <td style={tdDate}><span style={{ color: '#bbb', fontSize: 11 }}>{fmt(dg.validFrom)}</span></td>
                           <td style={tdDate}><span style={{ color: '#bbb', fontSize: 11 }}>{validTo}</span></td>
-                          <td style={{ ...tdL, color: '#999' }}>{direction?.origin?.name || '—'}</td>
-                          <td style={{ ...tdL, color: '#999' }}>{direction?.destination?.name || '—'}</td>
+                          <td style={{ ...tdL, color: '#999' }}>{direction?.origin?.name || dg.tariffs[0]?.originLocation?.name || '—'}</td>
+                          <td style={{ ...tdL, color: '#999' }}>{direction?.destination?.name || dg.tariffs[0]?.destinationLocation?.name || '—'}</td>
                           <td style={{ ...tdL, color: '#999' }}>{direction?.name || direction?.code || '—'}</td>
                           {hasPalletHist && <td style={td}>{!hasTripRows ? <PalletCell val={palletPrice} /> : <span style={{ color: '#e0e0e0' }}>—</span>}</td>}
                           {histVtList.map((vt: any) => <td key={vt.code} style={td}><PriceCell val={vtMap[vt.code]} /></td>)}
