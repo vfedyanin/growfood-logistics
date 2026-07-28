@@ -28,10 +28,12 @@
     "dayjs": "^1.11.20",
     "next": "14.2.35",
     "next-auth": "^5.0.0-beta.30",
+    "pdf-to-png-converter": "^4.1.1",
     "prisma": "^5.22.0",
     "react": "^18",
     "react-dom": "^18",
     "recharts": "^3.8.1",
+    "tesseract.js": "^7.0.0",
     "xlsx": "^0.18.5",
     "zod": "^4.3.6"
   },
