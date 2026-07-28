@@ -3,10 +3,12 @@
 import { prisma } from '@/lib/prisma';
 import type { ParsedImport } from './types';
 import { makeResolver } from './locationResolver';
+import { getClientTariffMap } from '@/lib/clientTariff';
+import { tariffPrice } from '@/lib/tariff';
 
 export type ImportResult = {
   customer?: string;
-  created: { requestNumber: string; destination: string; pallets: number }[];
+  created: { requestNumber: string; destination: string; pallets: number; finalCost: number | null }[];
   skipped: { destination: string; reason: string }[];
   errors: string[];
   warnings: string[];
@@ -51,6 +53,8 @@ export async function createRequestsFromParsed(
 
   const locs = await prisma.location.findMany({ select: { id: true, name: true } });
   const resolve = makeResolver(locs);
+  // Клиентские тарифы плательщика по точке — для авто-цены (finalCost груза)
+  const tariffMap = await getClientTariffMap(customer.id, parsed.documentDate ? new Date(parsed.documentDate) : new Date());
 
   for (const r of parsed.requests) {
     const dest = resolve(r.destinationName);
@@ -66,7 +70,12 @@ export async function createRequestsFromParsed(
     });
     if (dup) { result.skipped.push({ destination: dest.name, reason: `уже импортирована ранее (${dup.requestNumber})` }); continue; }
 
-    if (opts.dryRun) { result.created.push({ requestNumber: '(dry-run)', destination: dest.name, pallets: r.pallets }); continue; }
+    // Авто-цена по тарифу договора (PER_PALLET × паллеты / PER_TRIP / тир по вместимости ТС)
+    const tariff = tariffMap.get(dest.id);
+    const finalCost = tariff ? Math.max(0, tariffPrice(tariff, r.pallets)) : null;
+    if (!tariff) result.warnings.push(`${dest.name}: нет клиентского тарифа по точке — цена (finalCost) не рассчитана.`);
+
+    if (opts.dryRun) { result.created.push({ requestNumber: '(dry-run)', destination: dest.name, pallets: r.pallets, finalCost }); continue; }
 
     const requestNumber = await nextRequestNumber(parsed.documentDate);
     const created = await prisma.customerRequest.create({
@@ -97,7 +106,8 @@ export async function createRequestsFromParsed(
             pallets: r.pallets,
             weightKg: r.weightKg ?? null,
             tempRegime: (r.tempRegime as any) ?? null,
-            pricingMode: 'TARIFF', // цена по договору; finalCost считается на этапе авто-ценообразования
+            pricingMode: 'TARIFF',
+            finalCost, // авто-цена по тарифу договора
             notes: r.notes,
             createdById: actor,
             updatedById: actor,
@@ -119,7 +129,7 @@ export async function createRequestsFromParsed(
       },
       select: { requestNumber: true },
     });
-    result.created.push({ requestNumber: created.requestNumber, destination: dest.name, pallets: r.pallets });
+    result.created.push({ requestNumber: created.requestNumber, destination: dest.name, pallets: r.pallets, finalCost });
   }
   return result;
 }

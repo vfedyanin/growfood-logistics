@@ -4,7 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { serialize } from '@/lib/serialize';
 import { requireAuth, requireRole, getActorId, RoleName } from '@/lib/authz';
 import { revalidatePath } from 'next/cache';
-import { TariffInfo, toTariffInfo, tariffPrice } from '@/lib/tariff';
+import { tariffPrice } from '@/lib/tariff';
+import { getClientTariffMap } from '@/lib/clientTariff';
 
 type RequestStatus = 'NEW' | 'CONFIRMED' | 'IN_PLANNING' | 'IN_TRANSIT' | 'DELIVERED' | 'CANCELLED';
 
@@ -72,24 +73,13 @@ function cargoCreateData(c: any, actor: string | null) {
     legs: { create: (c.legs || []).map((l: any, i: number) => legCreateData(l, i + 1, actor)) },
   };
 }
-// Карта тарифов контрагента по точкам доставки: locationId → TariffInfo
-// ARCH_BACKLOG: Direction не содержит destinationId — тарифная карта по локациям временно не реализована
-async function getCustomerTariffMap(customerId: string, requestDate?: Date) {
-  const date = requestDate || new Date();
-  const map = new Map<string, TariffInfo>();
+// Карта тарифов контрагента по точкам доставки: locationId → TariffInfo.
+// Клиентские тарифы по Tariff.destinationLocationId (общий модуль, как в дашборде) +
+// legacy-фолбэк CustomerDeliveryLocation.
+async function getCustomerTariffMap(partyId: string, requestDate?: Date) {
+  const map = await getClientTariffMap(partyId, requestDate || new Date());
 
-  const contracts = await prisma.customerContract.findMany({
-    where: { OR: [{ customerId }, { members: { some: { customerId } } }] },
-    select: { id: true },
-  });
-  const contractIds = contracts.map((c) => c.id);
-
-  if (contractIds.length) {
-    // Direction больше не содержит destinationId — тарифная карта по локациям временно недоступна (ARCH_BACKLOG)
-  }
-
-  // Резервный фолбэк: CustomerDeliveryLocation (legacy, сейчас пустая)
-  const locs = await prisma.customerDeliveryLocation.findMany({ where: { customerId } });
+  const locs = await prisma.customerDeliveryLocation.findMany({ where: { customerId: partyId } });
   for (const l of locs) {
     if (!map.has(l.locationId)) map.set(l.locationId, { method: l.tariffMethod, amount: num(l.tariffAmount), tiers: [] });
   }
@@ -106,7 +96,8 @@ async function recomputeRequestFinals(requestId: string) {
     include: { cargoes: { include: { legs: true } } },
   });
   if (!req) return;
-  const tariffs = await getCustomerTariffMap(req.customerId, req.requestDate ?? undefined);
+  // Тариф ищем по плательщику (кто оплачивает доставку), с фолбэком на заказчика
+  const tariffs = await getCustomerTariffMap(req.payerId ?? req.customerId, req.requestDate ?? undefined);
   const tariffOf = (c: any) => (c.consigneeLocationId ? tariffs.get(c.consigneeLocationId) : undefined);
   const perTripCargoes = req.cargoes.filter(
     (c) => c.pricingMode === 'TARIFF' && tariffOf(c)?.method === 'PER_TRIP' && !(tariffOf(c)!.tiers.length > 0)
