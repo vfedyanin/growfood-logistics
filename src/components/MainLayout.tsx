@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Layout, Menu, Button, Dropdown, Avatar, Grid } from 'antd';
 import {
   DashboardOutlined,
@@ -24,6 +24,7 @@ import {
   SnippetsOutlined,
   PlusSquareOutlined,
   QuestionCircleOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
 import { useRouter, usePathname } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
@@ -46,6 +47,7 @@ function getItem(
 const menuItems: MenuItem[] = [
   getItem('Дашборд', '/dashboard', <DashboardOutlined />),
   getItem('Операции', '/operations', <CarOutlined />, [
+    getItem('Планирование', '/operations/planning', <CalendarOutlined />),
     getItem('Заявки', '/requests'),
     getItem('Рейсы', '/operations/trips'),
     getItem('Груз', '/operations/cargo'),
@@ -76,6 +78,10 @@ const menuItems: MenuItem[] = [
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    const saved = localStorage.getItem('sidebar-collapsed');
+    if (saved !== null) setCollapsed(saved === 'true');
+  }, []);
   const [mobileOpen, setMobileOpen] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
@@ -193,7 +199,9 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               if (isMobile) {
                 setMobileOpen(!mobileOpen);
               } else {
-                setCollapsed(!collapsed);
+                const next = !collapsed;
+                setCollapsed(next);
+                localStorage.setItem('sidebar-collapsed', String(next));
               }
             }}
             style={{ fontSize: '16px', width: 48, height: 48 }}

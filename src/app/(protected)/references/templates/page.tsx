@@ -3,9 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import {
   Tabs, Table, Button, Popconfirm, Modal, Form, Input, Space, Tag, message,
-  Typography, Descriptions, Divider, Card, Empty,
+  Typography, Descriptions, Divider, Card, Empty, Select,
 } from 'antd';
-import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, EyeOutlined, FormOutlined, SearchOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
 import {
@@ -96,6 +96,8 @@ function TemplatesTab({
   ViewComponent,
   extraColumns,
   editUrl,
+  ownerLabel,
+  getOwner,
 }: {
   loadList: () => Promise<any[]>;
   loadOne: (id: string) => Promise<any>;
@@ -104,6 +106,10 @@ function TemplatesTab({
   ViewComponent: React.ComponentType<{ item: any }>;
   extraColumns?: any[];
   editUrl?: (id: string) => string;
+  /** Как называется владелец шаблона на этой вкладке: «Заявитель» / «Перевозчик». */
+  ownerLabel: string;
+  /** Имя владельца для поиска, фильтра и группировки. */
+  getOwner: (row: any) => string;
 }) {
   const router = useRouter();
   const [items, setItems] = useState<any[]>([]);
@@ -114,6 +120,8 @@ function TemplatesTab({
   const [viewOpen, setViewOpen] = useState(false);
   const [viewItem, setViewItem] = useState<any>(null);
   const [viewLoading, setViewLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState<string | undefined>(undefined);
   const [form] = Form.useForm();
 
   const load = async () => {
@@ -123,6 +131,29 @@ function TemplatesTab({
   };
 
   useEffect(() => { load(); }, []);
+
+  // Владельцы для выпадающего фильтра — только те, у кого есть шаблоны
+  const ownerOptions = React.useMemo(() => {
+    const names = new Set<string>();
+    for (const it of items) { const n = getOwner(it); if (n) names.add(n); }
+    return Array.from(names)
+      .sort((a, b) => a.localeCompare(b, 'ru'))
+      .map((n) => ({ value: n, label: n }));
+  }, [items, getOwner]);
+
+  // Поиск по названию и владельцу + фильтр по владельцу.
+  // Группировка = сортировка по владельцу, затем по названию: шаблоны одного
+  // клиента идут подряд.
+  const visible = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return items
+      .filter((it) => !ownerFilter || getOwner(it) === ownerFilter)
+      .filter((it) => !q || `${it.name || ''} ${getOwner(it)}`.toLowerCase().includes(q))
+      .sort((a, b) =>
+        getOwner(a).localeCompare(getOwner(b), 'ru') ||
+        String(a.name || '').localeCompare(String(b.name || ''), 'ru')
+      );
+  }, [items, search, ownerFilter, getOwner]);
 
   const openRename = (item: any) => {
     setRenaming(item);
@@ -181,6 +212,9 @@ function TemplatesTab({
       render: (_: any, row: any) => (
         <Space size={0}>
           <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openView(row)} title="Просмотр" />
+          {editUrl && (
+            <Button type="text" size="small" icon={<FormOutlined />} onClick={() => router.push(editUrl(row.id))} title="Редактировать содержимое" />
+          )}
           <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openRename(row)} title="Переименовать" />
           <Popconfirm title="Удалить шаблон?" onConfirm={() => handleDelete(row.id)}>
             <Button type="text" size="small" danger icon={<DeleteOutlined />} title="Удалить" />
@@ -190,16 +224,45 @@ function TemplatesTab({
     },
   ];
 
+  const filtered = search.trim() !== '' || !!ownerFilter;
+
   return (
     <>
+      <Space wrap style={{ marginBottom: 12 }}>
+        <Input
+          allowClear
+          placeholder={`Поиск по названию и полю «${ownerLabel}»`}
+          prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ width: 320 }}
+        />
+        <Select
+          allowClear
+          showSearch
+          placeholder={ownerLabel}
+          options={ownerOptions}
+          value={ownerFilter}
+          onChange={(v) => setOwnerFilter(v)}
+          optionFilterProp="label"
+          style={{ width: 240 }}
+        />
+        {filtered && (
+          <>
+            <Button size="small" onClick={() => { setSearch(''); setOwnerFilter(undefined); }}>Сбросить</Button>
+            <Text type="secondary">Найдено: {visible.length} из {items.length}</Text>
+          </>
+        )}
+      </Space>
+
       <Table
         rowKey="id"
         size="small"
         loading={loading}
-        dataSource={items}
+        dataSource={visible}
         columns={columns}
         pagination={{ pageSize, showSizeChanger: true, pageSizeOptions: ['20', '50', '100'], showTotal: (t) => `Всего: ${t}`, onShowSizeChange: (_cur: number, size: number) => setPageSize(size) }}
-        locale={{ emptyText: 'Шаблонов нет' }}
+        locale={{ emptyText: filtered ? 'Ничего не найдено' : 'Шаблонов нет' }}
       />
 
       {/* Просмотр */}
@@ -219,8 +282,8 @@ function TemplatesTab({
         open={renameOpen}
         onOk={submitRename}
         onCancel={() => setRenameOpen(false)}
-        title="Редактировать шаблон"
-        okText="Сохранить название"
+        title="Переименовать шаблон"
+        okText="Сохранить"
         cancelText="Отмена"
       >
         <Form form={form} layout="vertical">
@@ -264,6 +327,8 @@ export default function TemplatesPage() {
                 onDelete={deleteRequestTemplate}
                 ViewComponent={RequestTemplateView}
                 editUrl={(id) => `/requests?editTemplate=${id}`}
+                ownerLabel="Заявитель"
+                getOwner={(row) => row.customerName || ''}
                 extraColumns={[
                   {
                     title: 'Заявитель',
@@ -285,6 +350,8 @@ export default function TemplatesPage() {
                 onDelete={deleteTripTemplate}
                 ViewComponent={TripTemplateView}
                 editUrl={(id) => `/operations/trips?editTemplate=${id}`}
+                ownerLabel="Перевозчик"
+                getOwner={(row) => row.carrierName || ''}
                 extraColumns={[
                   {
                     title: 'Перевозчик',

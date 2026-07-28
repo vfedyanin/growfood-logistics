@@ -4,7 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { serialize } from '@/lib/serialize';
 import { requireAuth, requireRole, getActorId, RoleName } from '@/lib/authz';
 import { revalidatePath } from 'next/cache';
-import { TariffInfo, toTariffInfo, tariffPrice } from '@/lib/tariff';
+import { recomputeRequestFinals, getCustomerVatRate, addVat } from '@/lib/pricing';
+import { nextRequestNumber } from '@/lib/numbering';
 
 type RequestStatus = 'NEW' | 'CONFIRMED' | 'IN_PLANNING' | 'IN_TRANSIT' | 'DELIVERED' | 'CANCELLED';
 
@@ -72,71 +73,9 @@ function cargoCreateData(c: any, actor: string | null) {
     legs: { create: (c.legs || []).map((l: any, i: number) => legCreateData(l, i + 1, actor)) },
   };
 }
-// Карта тарифов контрагента по точкам доставки: locationId → TariffInfo
-// ARCH_BACKLOG: Direction не содержит destinationId — тарифная карта по локациям временно не реализована
-async function getCustomerTariffMap(customerId: string, requestDate?: Date) {
-  const date = requestDate || new Date();
-  const map = new Map<string, TariffInfo>();
-
-  const contracts = await prisma.customerContract.findMany({
-    where: { OR: [{ customerId }, { members: { some: { customerId } } }] },
-    select: { id: true },
-  });
-  const contractIds = contracts.map((c) => c.id);
-
-  if (contractIds.length) {
-    // Direction больше не содержит destinationId — тарифная карта по локациям временно недоступна (ARCH_BACKLOG)
-  }
-
-  // Резервный фолбэк: CustomerDeliveryLocation (legacy, сейчас пустая)
-  const locs = await prisma.customerDeliveryLocation.findMany({ where: { customerId } });
-  for (const l of locs) {
-    if (!map.has(l.locationId)) map.set(l.locationId, { method: l.tariffMethod, amount: num(l.tariffAmount), tiers: [] });
-  }
-
-  return map;
-}
-
-// Пересчёт finalCost всех грузов заявки. TARIFF-грузы считаются с контекстом заявки:
-// PER_PALLET = ставка×паллеты; PER_TRIP = ставка (scope=CARGO) либо доля от общей суммы
-// (scope=REQUEST: Σ ставок уникальных точек ÷ число PER_TRIP-грузов). discount вычитается из базы.
-async function recomputeRequestFinals(requestId: string) {
-  const req = await prisma.customerRequest.findUnique({
-    where: { id: requestId },
-    include: { cargoes: { include: { legs: true } } },
-  });
-  if (!req) return;
-  const tariffs = await getCustomerTariffMap(req.customerId, req.requestDate ?? undefined);
-  const tariffOf = (c: any) => (c.consigneeLocationId ? tariffs.get(c.consigneeLocationId) : undefined);
-  const perTripCargoes = req.cargoes.filter(
-    (c) => c.pricingMode === 'TARIFF' && tariffOf(c)?.method === 'PER_TRIP' && !(tariffOf(c)!.tiers.length > 0)
-  );
-  let perTripShare = 0;
-  if (req.perTripScope === 'REQUEST' && perTripCargoes.length) {
-    const uniqLocs = Array.from(new Set(perTripCargoes.map((c) => c.consigneeLocationId as string)));
-    const total = uniqLocs.reduce((s, locId) => s + num(tariffs.get(locId)?.amount), 0);
-    perTripShare = total / perTripCargoes.length;
-  }
-  for (const c of req.cargoes) {
-    let final: number | null;
-    if (c.pricingMode === 'TARIFF') {
-      const t = tariffOf(c);
-      let base = 0;
-      if (t?.method === 'PER_PALLET') base = tariffPrice(t, num(c.pallets));
-      else if (t?.method === 'PER_TRIP') {
-        // PER_TRIP с тирами — цена по вместимости ТС; без тиров — фикс (или доля при scope=REQUEST)
-        if (t.tiers.length > 0) base = tariffPrice(t, num(c.pallets));
-        else base = req.perTripScope === 'REQUEST' ? perTripShare : num(t.amount);
-      }
-      final = Math.max(0, base - num(c.discount));
-    } else if (c.pricingMode === 'LEG') {
-      final = c.legs.reduce((s, l) => s + num(l.finalCost), 0);
-    } else {
-      final = c.cost != null || c.discount != null ? num(c.cost) - num(c.discount) : null;
-    }
-    await prisma.requestCargo.update({ where: { id: c.id }, data: { finalCost: final } });
-  }
-}
+// Поиск точечных тарифов и пересчёт итогов переехали в @/lib/pricing —
+// раньше здесь была заглушка (Direction не содержит destinationId, фолбэк шёл в
+// пустую CustomerDeliveryLocation), из-за чего TARIFF-грузы всегда считались в 0.
 
 // ============ List / Get ============
 export async function getRequests(filters?: { status?: RequestStatus; customerId?: string; verticalCode?: string; dateFrom?: string; dateTo?: string; deliveryFrom?: string; deliveryTo?: string }) {
@@ -186,7 +125,26 @@ export async function getRequests(filters?: { status?: RequestStatus; customerId
     });
   }
 
+  // Ставку НДС запрашиваем один раз на клиента, а не на каждую заявку
+  const custIds = Array.from(new Set(rows.map((r: any) => r.customerId).filter(Boolean))) as string[];
+  const vatByCustomer = new Map<string, number>();
+  await Promise.all(custIds.map(async (cid) => { vatByCustomer.set(cid, await getCustomerVatRate(cid)); }));
+  rows = rows.map((r: any) => withVatFields(r, vatByCustomer.get(r.customerId) ?? 0));
+
   return rows;
+}
+
+// Суммы с НДС считаем на сервере и отдаём готовыми: в интерфейсе показывается
+// ОДНО число — с НДС, а в базе finalCost хранится без НДС. Если считать в
+// компонентах, легко забыть НДС в одном из мест и показать разные суммы.
+function withVatFields(r: any, vatRatePct: number) {
+  if (!r) return r;
+  const cargoes = (r.cargoes || []).map((c: any) => ({
+    ...c,
+    finalCostGross: addVat(c.finalCost, vatRatePct),
+  }));
+  const net = cargoes.reduce((s: number, c: any) => s + (c.finalCost != null ? Number(c.finalCost) : 0), 0);
+  return { ...r, cargoes, vatRatePct, totalNet: net, totalGross: addVat(net, vatRatePct) };
 }
 
 export async function getRequest(id: string) {
@@ -195,7 +153,9 @@ export async function getRequest(id: string) {
     where: { id },
     include: { ...reqInclude, cargoes: { include: cargoInclude, orderBy: { createdAt: 'asc' } }, invoices: true },
   });
-  return serialize(result);
+  if (!result) return serialize(result);
+  const vat = await getCustomerVatRate(result.customerId);
+  return serialize(withVatFields(result, vat));
 }
 
 export async function getCustomerVerticalCode(customerId: string) {
@@ -204,15 +164,8 @@ export async function getCustomerVerticalCode(customerId: string) {
   return c?.verticalCode || null;
 }
 
-async function nextNumber(prefix: string): Promise<string> {
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  const full = `${prefix}-${ymd}-`;
-  const last = await prisma.customerRequest.findFirst({ where: { requestNumber: { startsWith: full } }, orderBy: { requestNumber: 'desc' } });
-  let n = 1;
-  if (last) { const m = last.requestNumber.match(/(\d+)$/); if (m) n = parseInt(m[1]) + 1; }
-  return `${full}${String(n).padStart(3, '0')}`;
-}
+// Нумерация переехала в @/lib/numbering — её же использует планирование.
+const nextNumber = nextRequestNumber;
 
 // ============ Create / Update / Delete ============
 export async function createRequest(input: any) {
@@ -235,6 +188,7 @@ export async function createRequest(input: any) {
   });
   if (cargoes.length) await recomputeRequestFinals(r.id);
   revalidatePath('/requests');
+  revalidatePath('/operations/planning');
   return r;
 }
 
@@ -255,6 +209,7 @@ export async function updateRequest(id: string, input: any) {
   // perTripScope может измениться — пересчитываем тарифные грузы заявки
   await recomputeRequestFinals(id);
   revalidatePath('/requests');
+  revalidatePath('/operations/planning');
 }
 
 export async function deleteRequest(id: string) {
@@ -262,6 +217,7 @@ export async function deleteRequest(id: string) {
   await prisma.invoice.deleteMany({ where: { requestId: id } });
   await prisma.customerRequest.delete({ where: { id } }); // cascade cargoes → legs
   revalidatePath('/requests');
+  revalidatePath('/operations/planning');
 }
 
 // ============ Грузы заявки (+ плечи) ============
@@ -271,6 +227,7 @@ export async function addRequestCargo(requestId: string, data: any) {
   await prisma.requestCargo.create({ data: { ...cargoCreateData(data, actor), requestId } });
   await recomputeRequestFinals(requestId);
   revalidatePath('/requests');
+  revalidatePath('/operations/planning');
 }
 export async function updateRequestCargo(id: string, data: any) {
   await requireRole(W);
@@ -289,14 +246,18 @@ export async function updateRequestCargo(id: string, data: any) {
   await recomputeRequestFinals(updated.requestId);
   revalidatePath('/requests');
   revalidatePath('/operations/cargo');
+  revalidatePath('/operations/planning');
 }
 export async function removeRequestCargo(id: string) {
   await requireRole(W);
   const assigned = await prisma.requestCargoLeg.count({ where: { requestCargoId: id, tripCargoUnitId: { not: null } } });
   if (assigned > 0) throw new Error('У груза есть плечи, привязанные к рейсам — сначала отвяжите их');
+  const cargo = await prisma.requestCargo.findUnique({ where: { id }, select: { requestId: true } });
   await prisma.requestCargo.delete({ where: { id } }); // cascade legs
+  if (cargo) await recomputeRequestFinals(cargo.requestId);
   revalidatePath('/requests');
   revalidatePath('/operations/cargo');
+  revalidatePath('/operations/planning');
 }
 
 // ============ Счёт из заявки ============
@@ -307,16 +268,23 @@ export async function createInvoiceFromRequest(requestId: string) {
   if (!req) throw new Error('Заявка не найдена');
   const amount = req.cargoes.reduce((s, c) => s + num(c.finalCost), 0);
   if (amount <= 0) throw new Error('Сумма итоговых стоимостей грузов равна нулю');
+  // finalCost хранится БЕЗ НДС, поэтому НДС начисляем сверху:
+  // amount — база, vatAmount — налог, total — к оплате.
+  // Раньше здесь было total = amount и пустой vatAmount, то есть счёт
+  // выставлялся на сумму без НДС.
+  const vatRatePct = await getCustomerVatRate(req.payerId || req.customerId);
+  const total = addVat(amount, vatRatePct) ?? amount;
+  const vatAmount = Math.round((total - amount) * 100) / 100;
   const invoiceNumber = await nextNumber('INV');
   const inv = await prisma.invoice.create({
     data: {
       invoiceNumber, invoiceDate: new Date(), direction: 'OUTGOING',
       customerId: req.payerId || req.customerId, requestId: req.id,
-      amount, total: amount, status: 'ISSUED', createdById: actor, updatedById: actor,
+      amount, vatAmount, total, status: 'ISSUED', createdById: actor, updatedById: actor,
     },
   });
   revalidatePath('/requests');
-  return { invoiceNumber: inv.invoiceNumber, amount };
+  return { invoiceNumber: inv.invoiceNumber, amount, vatAmount, total };
 }
 
 // ============ Плечо → рейс ============

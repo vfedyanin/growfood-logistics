@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/prisma';
 import { serialize } from '@/lib/serialize';
 import { requireAuth, requirePermission, getActorId } from '@/lib/authz';
+import { getCustomerPointTariffs } from '@/lib/pricing';
 import { revalidatePath } from 'next/cache';
 
 const W = 'references.write';
@@ -89,11 +90,19 @@ export async function getCustomerDeliveryLocations(customerId: string) {
   });
 }
 
-// TariffPreview: возвращает пустой список — Direction больше не содержит destinationId,
-// определение точки доставки по направлению будет реализовано отдельно (ARCH_BACKLOG)
-export async function getCustomerTariffLocations(_customerId: string) {
+// Тарифы точек доставки клиента для предпросчёта TARIFF-грузов в форме заявки.
+// Поиск — общий с серверным расчётом (@/lib/pricing), чтобы предпросмотр и итог
+// в заявке не могли разойтись.
+export async function getCustomerTariffLocations(customerId: string) {
   await requireAuth();
-  return [];
+  if (!customerId) return [];
+  const map = await getCustomerPointTariffs(customerId);
+  return Array.from(map.entries()).map(([locationId, info]) => ({
+    locationId,
+    tariffMethod: info.method,
+    tariffAmount: info.amount,
+    tiers: info.tiers,
+  }));
 }
 
 export async function addCustomerDeliveryLocation(customerId: string, locationId: string, tariffMethod?: string, tariffAmount?: number) {

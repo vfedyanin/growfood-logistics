@@ -12,9 +12,36 @@ export async function getCustomerContracts() {
   await requireAuth();
   return serialize(await prisma.customerContract.findMany({ include: { customer: true }, orderBy: { validFrom: 'desc' } }));
 }
+// Номер договора уникален (чип task_78028258). Проверяем до записи, чтобы вместо
+// служебной ошибки Prisma пользователь увидел, с каким договором конфликт.
+async function assertContractNumberFree(
+  kind: 'customer' | 'carrier',
+  contractNumber: string,
+  exceptId?: string,
+) {
+  const num = String(contractNumber || '').trim();
+  if (!num) throw new Error('Укажите номер договора');
+
+  const existing = kind === 'customer'
+    ? await prisma.customerContract.findFirst({
+        where: { contractNumber: num, ...(exceptId ? { id: { not: exceptId } } : {}) },
+        select: { contractNumber: true, customer: { select: { name: true } } },
+      })
+    : await prisma.carrierContract.findFirst({
+        where: { contractNumber: num, ...(exceptId ? { id: { not: exceptId } } : {}) },
+        select: { contractNumber: true, carrier: { select: { name: true } } },
+      });
+
+  if (existing) {
+    const owner = (existing as any).customer?.name || (existing as any).carrier?.name || 'другой контрагент';
+    throw new Error(`Договор № ${num} уже есть у «${owner}». Номер договора должен быть уникальным.`);
+  }
+}
+
 export async function createCustomerContract(data: any) {
   await requirePermission(W);
   const actor = await getActorId();
+  await assertContractNumberFree('customer', data.contractNumber);
   const r = await prisma.customerContract.create({ data: { ...data, createdById: actor, updatedById: actor } });
   revalidatePath('/references/customer-contracts');
   return r;
@@ -22,6 +49,7 @@ export async function createCustomerContract(data: any) {
 export async function updateCustomerContract(id: string, data: any) {
   await requirePermission(W);
   const actor = await getActorId();
+  if (data.contractNumber !== undefined) await assertContractNumberFree('customer', data.contractNumber, id);
   const r = await prisma.customerContract.update({ where: { id }, data: { ...data, updatedById: actor } });
   revalidatePath('/references/customer-contracts');
   return r;
@@ -158,6 +186,14 @@ export async function getCustomerContractDetail(id: string) {
         },
         orderBy: { validFrom: 'desc' },
       },
+      schedules: {
+        include: {
+          direction: { include: { origin: true, destination: true } },
+          originLocation: true,
+          destinationLocation: true,
+          requestTemplate: { select: { id: true, name: true } },
+        },
+      },
     },
   }));
 }
@@ -245,6 +281,7 @@ export async function getCarrierContracts() {
 export async function createCarrierContract(data: any) {
   await requirePermission(W);
   const actor = await getActorId();
+  await assertContractNumberFree('carrier', data.contractNumber);
   const r = await prisma.carrierContract.create({ data: { ...data, createdById: actor, updatedById: actor } });
   revalidatePath('/references/carrier-contracts');
   return r;
@@ -252,6 +289,7 @@ export async function createCarrierContract(data: any) {
 export async function updateCarrierContract(id: string, data: any) {
   await requirePermission(W);
   const actor = await getActorId();
+  if (data.contractNumber !== undefined) await assertContractNumberFree('carrier', data.contractNumber, id);
   const r = await prisma.carrierContract.update({ where: { id }, data: { ...data, updatedById: actor } });
   revalidatePath('/references/carrier-contracts');
   return r;
@@ -424,6 +462,112 @@ export async function deleteMarketPrice(id: string) {
   await requirePermission(W);
   await prisma.marketPrice.delete({ where: { id } });
   revalidatePath('/references/market-prices');
+}
+
+// ============ DirectionSchedule ============
+const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+
+/**
+ * Сохранение графика с историчностью.
+ *
+ * График — правило, действующее в период, как и тариф. Поэтому правка НЕ меняет
+ * строку на месте: текущая версия закрывается (validTo), заводится новая с
+ * указанной даты. Иначе сетка планирования за прошлые недели рисовалась бы по
+ * сегодняшним правилам и врала.
+ *
+ * validFrom задаёт пользователь руками — график обычно меняют заранее,
+ * «с понедельника», а не в день правки.
+ *
+ * ВАЖНО: validTo закрываемой версии проставляется всегда. В тарифах этого не
+ * делали, и накопились незакрытые дубли (task_06d57b36) — здесь не повторяем.
+ */
+export async function upsertDirectionSchedule(
+  contractId: string,
+  directionKey: { directionId?: string | null; originLocationId?: string | null; destinationLocationId?: string | null },
+  days: { mon?: number | null; tue?: number | null; wed?: number | null; thu?: number | null; fri?: number | null; sat?: number | null; sun?: number | null },
+  requestTemplateId?: string | null,
+  validFrom?: string | Date | null,
+) {
+  await requirePermission(W);
+
+  const keyWhere = directionKey.directionId
+    ? { customerContractId: contractId, directionId: directionKey.directionId }
+    : {
+        customerContractId: contractId,
+        originLocationId: directionKey.originLocationId ?? null,
+        destinationLocationId: directionKey.destinationLocationId ?? null,
+      };
+
+  // Действующая (незакрытая) версия — самая свежая по validFrom
+  const current = await prisma.directionSchedule.findFirst({
+    where: { ...keyWhere, validTo: null },
+    orderBy: { validFrom: 'desc' },
+  });
+
+  const templateData = requestTemplateId !== undefined ? { requestTemplateId: requestTemplateId ?? null } : {};
+
+  if (!current) {
+    await prisma.directionSchedule.create({
+      data: {
+        customerContractId: contractId,
+        ...directionKey,
+        ...days,
+        ...templateData,
+        validFrom: validFrom ? new Date(validFrom) : new Date(),
+      },
+    });
+    revalidatePath(`/references/customer-contracts/${contractId}`);
+    revalidatePath('/operations/planning');
+    return;
+  }
+
+  const daysChanged = DAY_KEYS.some((d) => (days[d] ?? null) !== (current[d] ?? null));
+  const templateChanged =
+    requestTemplateId !== undefined && (requestTemplateId ?? null) !== (current.requestTemplateId ?? null);
+
+  // Ничего по существу не изменилось — новую версию не плодим (в тарифах это
+  // приводило к лишним записям, task_7a813f47)
+  if (!daysChanged && !templateChanged) {
+    revalidatePath(`/references/customer-contracts/${contractId}`);
+    return;
+  }
+
+  const from = validFrom ? new Date(validFrom) : new Date();
+  from.setHours(0, 0, 0, 0);
+
+  // Дата новой версии не позже текущей — правим её на месте, а не плодим версию
+  // с той же датой начала (иначе выбор «действующей на неделю» станет неоднозначным)
+  if (from <= current.validFrom) {
+    await prisma.directionSchedule.update({
+      where: { id: current.id },
+      data: { ...days, ...templateData },
+    });
+    revalidatePath(`/references/customer-contracts/${contractId}`);
+    revalidatePath('/operations/planning');
+    return;
+  }
+
+  // Закрываем текущую версию днём раньше начала новой и заводим новую
+  const closeAt = new Date(from);
+  closeAt.setDate(closeAt.getDate() - 1);
+  closeAt.setHours(23, 59, 59, 999);
+
+  await prisma.$transaction([
+    prisma.directionSchedule.update({ where: { id: current.id }, data: { validTo: closeAt } }),
+    prisma.directionSchedule.create({
+      data: {
+        customerContractId: contractId,
+        ...directionKey,
+        ...days,
+        requestTemplateId:
+          requestTemplateId !== undefined ? requestTemplateId ?? null : current.requestTemplateId,
+        validFrom: from,
+      },
+    }),
+  ]);
+
+  revalidatePath(`/references/customer-contracts/${contractId}`);
+  revalidatePath('/operations/planning');
 }
 
 // ============ Option-getters ============

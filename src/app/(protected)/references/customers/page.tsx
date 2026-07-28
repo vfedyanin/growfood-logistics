@@ -6,6 +6,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined, EnvironmentOutlined } from 
 import DataTable from '@/components/DataTable';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
+import CodeInput from '@/components/CodeInput';
 import { VerticalSelect, LocationSelect } from '@/components/selects/EntitySelects';
 import {
   getCustomers, createCustomer, updateCustomer, deleteCustomer,
@@ -148,7 +149,9 @@ export default function CustomersPage() {
 
       <EntityForm open={open} title={editing ? 'Редактировать контрагента' : 'Новый контрагент'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:customer">
-        <Form.Item name="code" label="Код" rules={[{ required: true }]}><Input disabled={!!editing} placeholder="MAGNIT" /></Form.Item>
+        <Form.Item name="code" label="Код" rules={[{ required: true }]} extra={!editing ? 'Предлагается из названия, можно исправить' : undefined}>
+          <CodeInput key={editing?.id || 'new'} form={form} separator="" autoFill={!editing} disabled={!!editing} placeholder="MAGNIT" />
+        </Form.Item>
         <Form.Item name="name" label="Название" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="verticalCode" label="Вертикаль" rules={[{ required: true }]}><VerticalSelect style={{ width: '100%' }} /></Form.Item>
         <Form.Item name="customerType" label="Тип" rules={[{ required: true }]}><Select options={customerTypeOptions} /></Form.Item>

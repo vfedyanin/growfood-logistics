@@ -7,6 +7,7 @@ import DataTable from '@/components/DataTable';
 import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
+import CodeInput from '@/components/CodeInput';
 import { getLocations, createLocation, updateLocation, deleteLocation } from '@/lib/actions/references';
 
 const typeOptions = [
@@ -76,7 +77,9 @@ export default function LocationsPage() {
         toolbar={<Space><ImportExportButtons resource="locations" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать локацию' : 'Новая локация'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:location">
-        <Form.Item name="code" label="Код" rules={[{ required: true }]}><Input disabled={!!editing} placeholder="MSK_DC" /></Form.Item>
+        <Form.Item name="code" label="Код" rules={[{ required: true }]} extra={!editing ? 'Предлагается из названия с префиксом LOC-, можно исправить' : undefined}>
+          <CodeInput key={editing?.id || 'new'} form={form} prefix="LOC-" autoFill={!editing} disabled={!!editing} placeholder="LOC-MSK" />
+        </Form.Item>
         <Form.Item name="name" label="Название" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="type" label="Тип" rules={[{ required: true }]}><Select options={typeOptions} /></Form.Item>
         <Form.Item name="ownerType" label="Владелец" rules={[{ required: true }]}><Select options={ownerOptions} /></Form.Item>

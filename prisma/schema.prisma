@@ -130,6 +130,8 @@ model Location {
   directionsAsDestination Direction[]       @relation("DirectionDestination")
   tariffsAsOrigin         Tariff[]          @relation("TariffOrigin")
   tariffsAsDestination    Tariff[]          @relation("TariffDestination")
+  schedulesAsOrigin       DirectionSchedule[] @relation("ScheduleOrigin")
+  schedulesAsDestination  DirectionSchedule[] @relation("ScheduleDestination")
 }
 
 enum LocationType {
@@ -307,7 +309,8 @@ model Driver {
 
 model CustomerContract {
   id             String       @id @default(cuid())
-  contractNumber String
+  // Номера сквозные по компании (Д-001/2026 …), поэтому уникальность глобальная
+  contractNumber String       @unique
   customerId     String
   contractType   ContractType
   vatRatePct     Int          @default(0) // ставка НДС: 0(без НДС)/5/7/10/22
@@ -325,6 +328,7 @@ model CustomerContract {
   tariffs  Tariff[]                  @relation("CustContractTariff")
   acts     CustomerAct[]
   members  CustomerContractMember[]
+  schedules DirectionSchedule[]
 }
 
 model CustomerContractMember {
@@ -337,6 +341,36 @@ model CustomerContractMember {
   @@id([contractId, customerId])
 }
 
+model DirectionSchedule {
+  id                    String           @id @default(cuid())
+  customerContractId    String
+  directionId           String?
+  originLocationId      String?
+  destinationLocationId String?
+  mon                   Int?
+  tue                   Int?
+  wed                   Int?
+  thu                   Int?
+  fri                   Int?
+  sat                   Int?
+  sun                   Int?
+  requestTemplateId     String?
+  // Историчность: график — правило, действующее в период, как и тариф.
+  // Правка не меняет строку на месте, а закрывает её validTo и создаёт новую.
+  validFrom             DateTime
+  validTo               DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  customerContract    CustomerContract @relation(fields: [customerContractId], references: [id], onDelete: Cascade)
+  direction           Direction?       @relation(fields: [directionId], references: [id])
+  originLocation      Location?        @relation("ScheduleOrigin", fields: [originLocationId], references: [id])
+  destinationLocation Location?        @relation("ScheduleDestination", fields: [destinationLocationId], references: [id])
+  requestTemplate     RequestTemplate? @relation(fields: [requestTemplateId], references: [id])
+
+  @@index([validFrom])
+}
+
 enum ContractType {
   LAAS_SERVICE
   RETAIL_SUPPLY
@@ -345,7 +379,7 @@ enum ContractType {
 
 model CarrierContract {
   id             String    @id @default(cuid())
-  contractNumber String
+  contractNumber String    @unique
   carrierId      String
   vatRatePct     Int       @default(0) // ставка НДС: 0(без НДС)/5/7/10/22
   validFrom      DateTime
@@ -446,6 +480,7 @@ model Direction {
   tariffs       Tariff[]
   marketPrices  MarketPrice[]
   legs          RequestCargoLeg[]
+  schedules     DirectionSchedule[]
 
   @@map("Route")
 }
@@ -1010,4 +1045,6 @@ model RequestTemplate {
   updatedAt   DateTime @updatedAt
   createdById String?
   updatedById String?
+
+  schedules DirectionSchedule[]
 }

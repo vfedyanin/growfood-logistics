@@ -234,7 +234,7 @@ export default function RequestDetailPage() {
 
   // ---- счёт / рейс ----
   const onCreateInvoice = async () => {
-    try { const r = await createInvoiceFromRequest(id); message.success(`Счёт ${r.invoiceNumber} на ${rub(r.amount)}`); refresh(); }
+    try { const r = await createInvoiceFromRequest(id); message.success(`Счёт ${r.invoiceNumber} на ${rub(r.total)}`); refresh(); }
     catch (e: any) { message.error(e?.message || 'Ошибка'); }
   };
   const onCreateTrip = async () => {
@@ -246,7 +246,12 @@ export default function RequestDetailPage() {
     catch (e: any) { message.error(e?.message || 'Ошибка'); }
   };
 
-  const reqSum = (r: any) => (r?.cargoes || []).reduce((s: number, c: any) => s + (c.finalCost != null ? Number(c.finalCost) : 0), 0);
+  // Суммы приходят с сервера уже с НДС (totalGross / finalCostGross): в базе
+  // finalCost хранится без НДС, а пользователю показывается одно число — с НДС.
+  const reqSum = (r: any) =>
+    r?.totalGross != null
+      ? Number(r.totalGross)
+      : (r?.cargoes || []).reduce((s: number, c: any) => s + (c.finalCost != null ? Number(c.finalCost) : 0), 0);
 
   const legColumns = (cargo: any) => [
     { title: 'Маршрут', key: 'route', render: (_: any, l: any) => `${l.pickupLocation?.name || '—'} → ${l.dropoffLocation?.name || '—'}` },
@@ -259,7 +264,7 @@ export default function RequestDetailPage() {
       },
       responsive: ['lg'] as any,
     },
-    { title: 'Итого', dataIndex: 'finalCost', key: 'fc', render: rub, responsive: ['lg'] as any },
+    { title: 'Итого', dataIndex: 'finalCostGross', key: 'fc', render: rub, responsive: ['lg'] as any },
     {
       title: 'Рейс', key: 'trip',
       render: (_: any, l: any) => l.tripCargoUnit?.trip
@@ -393,8 +398,8 @@ export default function RequestDetailPage() {
           {(req.deliveryTimeFrom || req.deliveryTimeTo) ? ` · ${req.deliveryTimeFrom || '?'}–${req.deliveryTimeTo || '?'}` : ''}
         </Descriptions.Item>
         <Descriptions.Item label="Паллет">{req.requestedPallets ?? '—'}</Descriptions.Item>
-        <Descriptions.Item label="Сумма (итого)">{rub(reqSum(req))}</Descriptions.Item>
-        <Descriptions.Item label="Счета">{req.invoices?.length ? req.invoices.map((i: any) => `${i.invoiceNumber} (${rub(i.amount)})`).join(', ') : '—'}</Descriptions.Item>
+        <Descriptions.Item label={req.vatRatePct ? `Сумма (с НДС ${Number(req.vatRatePct)}%)` : 'Сумма (итого)'}>{rub(reqSum(req))}</Descriptions.Item>
+        <Descriptions.Item label="Счета">{req.invoices?.length ? req.invoices.map((i: any) => `${i.invoiceNumber} (${rub(i.total ?? i.amount)})`).join(', ') : '—'}</Descriptions.Item>
         {req.notes && <Descriptions.Item label="Примечания" span={2}>{req.notes}</Descriptions.Item>}
       </Descriptions>
 
@@ -410,7 +415,7 @@ export default function RequestDetailPage() {
       )}
       {(req.cargoes || []).map((c: any) => (
         <Card key={c.id} size="small" style={{ marginBottom: 8 }}
-          title={`${c.consigneeLocation?.name || c.consignee?.name || 'Груз'} · ${c.pallets ?? '—'}пал/${c.traysCount ?? '—'}лот · итого ${rub(c.finalCost)} · ${pricingLabel(c.pricingMode)}`}
+          title={`${c.consigneeLocation?.name || c.consignee?.name || 'Груз'} · ${c.pallets ?? '—'}пал/${c.traysCount ?? '—'}лот · итого ${rub(c.finalCostGross ?? c.finalCost)} · ${pricingLabel(c.pricingMode)}`}
           extra={canWrite && (
             <Space>
               <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditCargo(c)} />
