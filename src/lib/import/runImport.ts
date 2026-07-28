@@ -3,7 +3,7 @@ import { ocrPdf } from './ocr';
 import { getParser } from './parsers';
 import { createRequestsFromParsed, type ImportResult } from './createRequests';
 
-export type RunImportResult = ImportResult & { ocrChars: number; parserKey: string; ocrText?: string };
+export type RunImportResult = ImportResult & { ocrChars: number; parserKey: string };
 
 // Итоговый статус прогона для лога.
 export function importStatus(r: ImportResult): 'SUCCESS' | 'PARTIAL' | 'EMPTY' | 'ERROR' {
@@ -27,6 +27,5 @@ export async function importPdf(
   const text = await ocrPdf(pdfBuffer);
   const parsed = parser(text);
   const result = await createRequestsFromParsed(parsed, opts);
-  // ocrText — временно для отладки парсера под раскладку конкретного OCR (виден в «Деталях» лога)
-  return { ...result, parserKey, ocrChars: text.length, ocrText: text.slice(0, 8000) };
+  return { ...result, parserKey, ocrChars: text.length };
 }

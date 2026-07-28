@@ -150,12 +150,6 @@ export default function ImportLogPage() {
             {renderList('Пропущено', detail.details?.skipped?.map((s: any) => `${s.destination}: ${s.reason}`), 'orange')}
             {renderList('Ошибки', detail.details?.errors ?? (detail.details?.fatalError ? [detail.details.fatalError] : []), 'red')}
             {renderList('Предупреждения', detail.details?.warnings, 'orange')}
-            {detail.details?.ocrText && (
-              <div style={{ marginTop: 8 }}>
-                <Text strong>OCR-текст (для отладки):</Text>
-                <pre style={{ maxHeight: 260, overflow: 'auto', background: '#f5f5f5', padding: 8, borderRadius: 6, fontSize: 12, whiteSpace: 'pre-wrap', marginTop: 4 }}>{detail.details.ocrText}</pre>
-              </div>
-            )}
           </>
         )}
       </Modal>
