@@ -58,6 +58,7 @@ export default function ImportLogPage() {
       fd.append('customerId', selCustomer);
       fd.append('file', file);
       const res = await runManualImport(fd);
+      if (!res?.status) { message.error('Пустой ответ сервера (возможно, таймаут)'); load(); return; }
       const cfg = statusCfg[res.status];
       message[res.status === 'ERROR' ? 'error' : res.status === 'SUCCESS' ? 'success' : 'info'](`${cfg?.label}: ${res.message}`);
       setFile(null);
