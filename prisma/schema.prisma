@@ -161,6 +161,10 @@ model Customer {
   phone         String?
   email         String?
   isActive      Boolean      @default(true)
+  // Авто-импорт заявок из писем (PDF). Включается только при заполненном email.
+  autoImportEnabled Boolean  @default(false)
+  importSince   DateTime?    // забирать только письма после этой даты (watermark по контрагенту)
+  parserKey     String?      // ключ парсера PDF для этого контрагента (напр. "korolevsky-vkus")
   notes         String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -651,6 +655,7 @@ model CustomerRequest {
   productCategory    ProductCategory?
   tempRegime         TempRegime?
   status             RequestStatus    @default(NEW)
+  source             RequestSource    @default(MANUAL)
   perTripScope       PerTripScope     @default(CARGO)
   notes              String?
   clientUpd          String?
@@ -684,6 +689,12 @@ enum RequestStatus {
   IN_TRANSIT
   DELIVERED
   CANCELLED
+}
+
+// Источник заявки: вручную оператором или авто-импорт из письма (PDF).
+enum RequestSource {
+  MANUAL
+  EMAIL_IMPORT
 }
 
 model QualityEvent {

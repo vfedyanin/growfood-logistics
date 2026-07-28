@@ -168,6 +168,7 @@ export default function RequestsPage() {
   const [fStatus, setFStatus] = useState<string>();
   const [fCustomer, setFCustomer] = useState<string>();
   const [fVertical, setFVertical] = useState<string>();
+  const [fSource, setFSource] = useState<string>();
   const [fRange, setFRange] = useState<any>(null);
   const [fDeliveryRange, setFDeliveryRange] = useState<any>(null);
 
@@ -221,6 +222,7 @@ export default function RequestsPage() {
       if (fStatus) filters.status = fStatus;
       if (fCustomer) filters.customerId = fCustomer;
       if (fVertical) filters.verticalCode = fVertical;
+      if (fSource) filters.source = fSource;
       // Если выбрана одна дата — точное совпадение (from=startOfDay, to=endOfDay той же даты)
       const pickupFrom = fRange?.[0] ?? fRange?.[1];
       const pickupTo = fRange?.[1] ?? fRange?.[0];
@@ -234,7 +236,7 @@ export default function RequestsPage() {
       setData(await getRequests(filters));
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [fStatus, fCustomer, fVertical, fRange, fDeliveryRange]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [fStatus, fCustomer, fVertical, fSource, fRange, fDeliveryRange]);
   const loadTemplates = async () => setTemplates(await getRequestTemplates());
   useEffect(() => { loadTemplates(); }, []);
 
@@ -475,6 +477,7 @@ export default function RequestsPage() {
     { title: 'Паллет', key: 'pallets', width: 80, render: (_: any, r: any) => { const t = (r.cargoes || []).reduce((s: number, c: any) => s + (c.pallets != null ? Number(c.pallets) : 0), 0); return t || '—'; } },
     { title: 'Сумма', key: 'sum', render: (_: any, r: any) => rub(reqSum(r)) },
     { title: 'Статус', dataIndex: 'status', key: 'status', render: (s: string) => <Tag color={statusCfg[s]?.color}>{statusCfg[s]?.label || s}</Tag> },
+    { title: 'Источник', key: 'source', width: 100, render: (_: any, r: any) => r.source === 'EMAIL_IMPORT' ? <Tag color="purple">import</Tag> : <Tag>вручную</Tag> },
     {
       title: 'Действия', key: 'actions', width: 160,
       render: (_: any, r: any) => (
@@ -541,10 +544,11 @@ export default function RequestsPage() {
 
   return (
     <>
-      <FilterBar onReset={() => { setFStatus(undefined); setFCustomer(undefined); setFVertical(undefined); setFRange(null); setFDeliveryRange(null); }}>
+      <FilterBar onReset={() => { setFStatus(undefined); setFCustomer(undefined); setFVertical(undefined); setFSource(undefined); setFRange(null); setFDeliveryRange(null); }}>
         <Select placeholder="Статус" allowClear style={{ width: 170 }} value={fStatus} onChange={setFStatus} options={Object.entries(statusCfg).map(([v, c]) => ({ value: v, label: c.label }))} />
         <CustomerSelect placeholder="Заявитель" style={{ width: 200 }} value={fCustomer} onChange={setFCustomer} />
         <VerticalSelect placeholder="Вертикаль" style={{ width: 180 }} value={fVertical} onChange={setFVertical} />
+        <Select placeholder="Источник" allowClear style={{ width: 150 }} value={fSource} onChange={setFSource} options={[{ value: 'EMAIL_IMPORT', label: 'import' }, { value: 'MANUAL', label: 'вручную' }]} />
         <DatePicker.RangePicker value={fRange} onChange={setFRange} onCalendarChange={setFRange} format="DD.MM.YYYY" placeholder={['Отправка с', 'Отправка по']} />
         <DatePicker.RangePicker value={fDeliveryRange} onChange={setFDeliveryRange} onCalendarChange={setFDeliveryRange} format="DD.MM.YYYY" placeholder={['Доставка с', 'Доставка по']} />
       </FilterBar>

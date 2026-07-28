@@ -139,12 +139,13 @@ async function recomputeRequestFinals(requestId: string) {
 }
 
 // ============ List / Get ============
-export async function getRequests(filters?: { status?: RequestStatus; customerId?: string; verticalCode?: string; dateFrom?: string; dateTo?: string; deliveryFrom?: string; deliveryTo?: string }) {
+export async function getRequests(filters?: { status?: RequestStatus; customerId?: string; verticalCode?: string; source?: string; dateFrom?: string; dateTo?: string; deliveryFrom?: string; deliveryTo?: string }) {
   await requireAuth();
   const where: any = {};
   if (filters?.status) where.status = filters.status;
   if (filters?.customerId) where.customerId = filters.customerId;
   if (filters?.verticalCode) where.verticalCode = filters.verticalCode;
+  if (filters?.source) where.source = filters.source;
   const result = await prisma.customerRequest.findMany({
     where,
     include: { ...reqInclude, cargoes: { include: cargoInclude }, invoices: true },
