@@ -5,7 +5,7 @@ const nextConfig = {
       bodySizeLimit: '5mb', // сканы PDF во вложениях писем
     },
     // Тяжёлые нативные/wasm-пакеты OCR не бандлим webpack'ом — грузим как внешние в рантайме
-    serverComponentsExternalPackages: ['tesseract.js', 'pdf-to-png-converter', '@napi-rs/canvas'],
+    serverComponentsExternalPackages: ['tesseract.js', 'pdf-to-png-converter', '@napi-rs/canvas', 'pdfjs-dist'],
     // pdfjs подгружает worker динамическим import — трейсинг Next его не видит; включаем принудительно
     // в бандл функций OCR-маршрутов, иначе на Vercel «Cannot find module pdf.worker.mjs».
     outputFileTracingIncludes: {
