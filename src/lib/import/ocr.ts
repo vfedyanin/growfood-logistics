@@ -3,9 +3,29 @@
 import { pdfToPng } from 'pdf-to-png-converter';
 import { createWorker } from 'tesseract.js';
 import * as canvasNapi from '@napi-rs/canvas';
+import { createRequire } from 'node:module';
 
 // viewportScale 3.0 ≈ 300 DPI — баланс точности OCR и памяти/времени.
 const VIEWPORT_SCALE = 3.0;
+
+// pdfjs (внутри pdf-to-png-converter) грузит свой worker динамическим import относительно
+// pdf.mjs — трейсинг Next этот путь не видит, на Vercel «Cannot find module pdf.worker.mjs».
+// Задаём GlobalWorkerOptions.workerSrc через СТАТИЧЕСКИЙ require.resolve: это (а) включает файл
+// в трейс той же функции, что делает OCR, и (б) даёт корректный абсолютный путь в рантайме.
+// pdf.mjs — ESM-синглтон, поэтому instance тот же, что использует pdf-to-png-converter.
+let pdfWorkerReady = false;
+async function ensurePdfWorker() {
+  if (pdfWorkerReady) return;
+  pdfWorkerReady = true;
+  try {
+    const req = createRequire(import.meta.url);
+    const workerSrc = req.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs');
+    const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    if (pdfjs?.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+  } catch {
+    // локально worker резолвится сам — не критично
+  }
+}
 
 // pdfjs (внутри pdf-to-png-converter) при рендере использует DOM-глобалы (DOMMatrix и др.),
 // которых нет в Node/serverless-рантайме Vercel («DOMMatrix is not defined»). Полифиллим из
@@ -19,6 +39,7 @@ function ensureDomGlobals() {
 
 export async function ocrPdf(pdfBuffer: Buffer): Promise<string> {
   ensureDomGlobals();
+  await ensurePdfWorker();
   const pages = await pdfToPng(pdfBuffer, { viewportScale: VIEWPORT_SCALE });
   // langPath/cachePath через env — чтобы на Vercel бандлить rus.traineddata локально,
   // а не тянуть с CDN в рантайме (по умолчанию tesseract.js грузит с CDN).
