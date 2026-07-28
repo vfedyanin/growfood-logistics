@@ -6,6 +6,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
+import CodeInput from '@/components/CodeInput';
 import {
   getAdditionalServices, createAdditionalService, updateAdditionalService, deleteAdditionalService,
 } from '@/lib/actions/references';
@@ -60,8 +61,8 @@ export default function AdditionalServicesPage() {
         toolbar={w ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button> : undefined} />
       <EntityForm open={open} title={editing ? 'Редактировать услугу' : 'Новая услуга'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:additionalService">
-        <Form.Item name="code" label="Код" rules={[{ required: true }]}>
-          <Input disabled={!!editing} placeholder="WAIT" style={{ textTransform: 'uppercase' }} />
+        <Form.Item name="code" label="Код" rules={[{ required: true }]} extra={!editing ? 'Предлагается из названия, можно исправить' : undefined}>
+          <CodeInput key={editing?.code || 'new'} form={form} separator="_" autoFill={!editing} disabled={!!editing} placeholder="WAIT" />
         </Form.Item>
         <Form.Item name="name" label="Название" rules={[{ required: true }]}>
           <Input placeholder="Ожидание (час)" />

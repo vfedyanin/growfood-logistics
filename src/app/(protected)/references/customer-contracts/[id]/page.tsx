@@ -6,15 +6,16 @@ import {
   Button, Form, Input, DatePicker, Select, Space, Popconfirm, Tag, message,
   Descriptions, Typography, Spin, InputNumber, Switch, Modal,
 } from 'antd';
-import { ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, HistoryOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, HistoryOutlined, RightOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { LocationSelect, CustomerSelect } from '@/components/selects/EntitySelects';
 import { getVehicleTypes } from '@/lib/actions/references';
 import {
   getCustomerContractDetail, updateCustomerContractNotes,
   createContractTariff, updateContractTariff, deleteContractTariff,
-  addContractMember, removeContractMember,
+  addContractMember, removeContractMember, upsertDirectionSchedule,
 } from '@/lib/actions/contracts';
+import { getRequestTemplatesFull } from '@/lib/actions/templates';
 
 const { Title, Text } = Typography;
 
@@ -60,15 +61,66 @@ export default function CustomerContractDetailPage() {
   const [priceIncludesVat, setPriceIncludesVat] = useState(false);
   const [tariffType, setTariffType] = useState<'PER_PALLET' | 'PER_TRIP'>('PER_PALLET');
   const [showHistory, setShowHistory] = useState(false);
+  const [expandedRoutes, setExpandedRoutes] = useState<Set<string>>(new Set());
+  const [scheduleEdits, setScheduleEdits] = useState<Record<string, Record<string, number | null>>>({});
+  const [scheduleTemplates, setScheduleTemplates] = useState<Record<string, string | null>>({});
+  // Дата начала новой версии графика — задаётся руками, график меняют заранее
+  const [scheduleFrom, setScheduleFrom] = useState<Record<string, any>>({});
+  const [scheduleSaving, setScheduleSaving] = useState<Set<string>>(new Set());
+  const [requestTemplateOptions, setRequestTemplateOptions] = useState<{ value: string; label: string }[]>([]);
   const [form] = Form.useForm();
+
+  const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+  const DAY_LABELS: Record<string, string> = { mon: 'Пн', tue: 'Вт', wed: 'Ср', thu: 'Чт', fri: 'Пт', sat: 'Сб', sun: 'Вс' };
+  const routeKey = (rd: RouteData) => `${rd.originLocation?.id || '__'}_${rd.destinationLocation?.id || '__'}`;
+  // Версий графика теперь может быть несколько — берём действующую (незакрытую),
+  // при отсутствии таковой — самую свежую по validFrom.
+  const getSchedule = (rd: RouteData) => {
+    const rk = routeKey(rd);
+    const all = (contract?.schedules || []).filter((s: any) =>
+      `${s.originLocationId || '__'}_${s.destinationLocationId || '__'}` === rk
+    );
+    if (!all.length) return undefined;
+    return (
+      all.find((s: any) => !s.validTo) ??
+      [...all].sort((a: any, b: any) => +new Date(b.validFrom) - +new Date(a.validFrom))[0]
+    );
+  };
+  const toggleRoute = (rk: string) => setExpandedRoutes(prev => {
+    const next = new Set(prev);
+    if (next.has(rk)) next.delete(rk); else next.add(rk);
+    return next;
+  });
+  const saveSchedule = async (rd: RouteData) => {
+    const rk = routeKey(rd);
+    const edits = scheduleEdits[rk] || {};
+    const schedule = getSchedule(rd);
+    const days: any = {};
+    for (const d of DAYS) { days[d] = edits[d] !== undefined ? edits[d] : (schedule?.[d] ?? null); }
+    const templateId = scheduleTemplates[rk] !== undefined ? scheduleTemplates[rk] : (schedule?.requestTemplateId ?? null);
+    setScheduleSaving(prev => new Set(prev).add(rk));
+    try {
+      const from = scheduleFrom[rk] ? scheduleFrom[rk].format('YYYY-MM-DD') : null;
+      await upsertDirectionSchedule(id, { originLocationId: rd.originLocation?.id ?? null, destinationLocationId: rd.destinationLocation?.id ?? null }, days, templateId, from);
+      message.success('График сохранён');
+      await refresh();
+      setScheduleEdits(prev => { const n = { ...prev }; delete n[rk]; return n; });
+      setScheduleTemplates(prev => { const n = { ...prev }; delete n[rk]; return n; });
+      setScheduleFrom(prev => { const n = { ...prev }; delete n[rk]; return n; });
+    } catch { message.error('Ошибка сохранения'); }
+    finally { setScheduleSaving(prev => { const n = new Set(prev); n.delete(rk); return n; }); }
+  };
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, vt] = await Promise.all([getCustomerContractDetail(id), getVehicleTypes()]);
+      const [c, vt, tpls] = await Promise.all([getCustomerContractDetail(id), getVehicleTypes(), getRequestTemplatesFull()]);
       setContract(c);
       setVtList([...vt].sort((a: any, b: any) => parseInt(a.code.replace('VT-', '')) - parseInt(b.code.replace('VT-', ''))));
       setNotesValue(c?.notes || '');
+      const customerId = c?.customerId;
+      const filtered = (tpls as any[]).filter(t => (t.data as any)?.customerId === customerId);
+      setRequestTemplateOptions(filtered.map((t: any) => ({ value: t.id, label: t.name })));
     } finally { setLoading(false); }
   }, [id]);
 
@@ -198,11 +250,13 @@ export default function CustomerContractDetailPage() {
           <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>Добавить тариф</Button>
         </div>
         <div style={{ padding: 20 }}>
-          {currentItems.length === 0 && <Text type="secondary">Тарифы не добавлены</Text>}
-          {currentItems.length > 0 && (
+          {routeData.length === 0 && <Text type="secondary">Тарифы не добавлены</Text>}
+          {routeData.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr>
+                  <th rowSpan={hasTripTariffs ? 2 : 1} style={{ ...th, width: 28, padding: '7px 4px' }} />
                   <th rowSpan={hasTripTariffs ? 2 : 1} style={thL}>Дата с</th>
                   <th rowSpan={hasTripTariffs ? 2 : 1} style={thL}>Откуда</th>
                   <th rowSpan={hasTripTariffs ? 2 : 1} style={thL}>Куда</th>
@@ -220,45 +274,125 @@ export default function CustomerContractDetailPage() {
                 )}
               </thead>
               <tbody>
-                {currentItems.map(({ entry }) => {
-                  const t = entry.tariff;
+                {routeData.map(rd => {
+                  const t = rd.entries[0].tariff;
+                  const rk = routeKey(rd);
+                  const isExpanded = expandedRoutes.has(rk);
+                  const schedule = getSchedule(rd);
+                  const edits = scheduleEdits[rk] || {};
+                  const dayVal = (d: string) => edits[d] !== undefined ? edits[d] : (schedule?.[d] ?? null);
+                  const colSpanTotal = 7 + (hasTripTariffs ? displayVtList.length : 0);
                   const tierMap: Record<string, number> = {};
                   t.tiers?.forEach((tier: any) => { tierMap[tier.vehicleTypeCode] = Number(tier.price); });
                   return (
-                    <tr key={t.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                      <td style={tdL}><Tag color="blue" style={{ fontSize: 11 }}>{dayjs(entry.validFrom).format('DD.MM.YYYY')}</Tag></td>
-                      <td style={tdL}>{t.originLocation?.name || '—'}</td>
-                      <td style={tdL}>{t.destinationLocation?.name || '—'}</td>
-                      <td style={td}>
-                        <Tag color={t.tariffType === 'PER_PALLET' ? 'purple' : 'blue'} style={{ fontSize: 11 }}>
-                          {t.tariffType === 'PER_PALLET' ? 'паллет' : 'рейс'}
-                        </Tag>
-                      </td>
-                      <td style={td}>
-                        {t.pricePerPallet != null
-                          ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace' }}>{Number(t.pricePerPallet).toLocaleString('ru')} ₽</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
-                          : <span style={{ color: '#ccc' }}>—</span>}
-                      </td>
-                      {displayVtList.map((vt: any) => (
-                        <td key={vt.code} style={td}>
-                          {tierMap[vt.code] != null
-                            ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace' }}>{tierMap[vt.code].toLocaleString('ru')}</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
-                            : <span style={{ color: '#e0e0e0' }}>—</span>}
+                    <React.Fragment key={t.id}>
+                      <tr style={{ borderBottom: isExpanded ? 'none' : '1px solid #f0f0f0', cursor: 'pointer' }} onClick={() => toggleRoute(rk)}>
+                        <td style={{ ...td, padding: '6px 4px 6px 10px', width: 28 }}>
+                          <RightOutlined style={{ fontSize: 10, color: '#bbb', transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'none' }} />
                         </td>
-                      ))}
-                      <td style={td}>
-                        <Space size={0}>
-                          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(t)} />
-                          <Popconfirm title="Удалить тариф?" onConfirm={() => onDeleteTariff(t.id)}>
-                            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-                          </Popconfirm>
-                        </Space>
-                      </td>
-                    </tr>
+                        <td style={tdL}><Tag color="blue" style={{ fontSize: 11 }}>{dayjs(rd.entries[0].validFrom).format('DD.MM.YYYY')}</Tag></td>
+                        <td style={tdL}>{t.originLocation?.name || '—'}</td>
+                        <td style={tdL}>{t.destinationLocation?.name || '—'}</td>
+                        <td style={td}>
+                          <Tag color={t.tariffType === 'PER_PALLET' ? 'purple' : 'blue'} style={{ fontSize: 11 }}>
+                            {t.tariffType === 'PER_PALLET' ? 'паллет' : 'рейс'}
+                          </Tag>
+                        </td>
+                        <td style={td}>
+                          {t.pricePerPallet != null
+                            ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace' }}>{Number(t.pricePerPallet).toLocaleString('ru')} ₽</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
+                            : <span style={{ color: '#ccc' }}>—</span>}
+                        </td>
+                        {displayVtList.map((vt: any) => (
+                          <td key={vt.code} style={td}>
+                            {tierMap[vt.code] != null
+                              ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}><span style={{ fontFamily: 'monospace' }}>{tierMap[vt.code].toLocaleString('ru')}</span><span style={{ color: '#aaa', fontSize: 10 }}>нетто</span></div>
+                              : <span style={{ color: '#e0e0e0' }}>—</span>}
+                          </td>
+                        ))}
+                        <td style={td} onClick={e => e.stopPropagation()}>
+                          <Space size={0}>
+                            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(t)} />
+                            <Popconfirm title="Удалить тариф?" onConfirm={() => onDeleteTariff(t.id)}>
+                              <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+                            </Popconfirm>
+                          </Space>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+                          <td colSpan={colSpanTotal} style={{ padding: '8px 16px 12px 40px', background: '#fafafa' }}>
+                            <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>
+                              График выезда — кол-во дней в пути до доставки.{' '}
+                              <b>0 = доставка в день забора</b>, пустое поле = в этот день не возим.
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                              {DAYS.map(d => (
+                                <div key={d} style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{DAY_LABELS[d]}</div>
+                                  <InputNumber
+                                    value={dayVal(d) as any}
+                                    min={0} max={30} precision={0}
+                                    // Подсвечиваем и ноль: это «день в день», а не «не возим»
+                                    style={{ width: 52, background: dayVal(d) != null ? '#f6ffed' : undefined, borderColor: dayVal(d) != null ? '#b7eb8f' : undefined }}
+                                    onChange={v => setScheduleEdits(prev => ({ ...prev, [rk]: { ...(prev[rk] || {}), [d]: v } }))}
+                                    onClick={e => e.stopPropagation()}
+                                  />
+                                </div>
+                              ))}
+                              <div style={{ marginLeft: 8 }}>
+                                <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Шаблон заявки</div>
+                                <Select
+                                  size="small"
+                                  allowClear
+                                  showSearch
+                                  filterOption={(input, opt) => (opt?.label as string ?? '').toLowerCase().includes(input.toLowerCase())}
+                                  placeholder="Не выбран"
+                                  style={{ width: 220 }}
+                                  options={requestTemplateOptions}
+                                  value={scheduleTemplates[rk] !== undefined ? scheduleTemplates[rk] : (schedule?.requestTemplateId ?? null)}
+                                  onChange={v => setScheduleTemplates(prev => ({ ...prev, [rk]: v ?? null }))}
+                                  onClick={e => e.stopPropagation()}
+                                />
+                              </div>
+                              <div style={{ marginLeft: 8 }}>
+                                <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Действует с</div>
+                                <DatePicker
+                                  size="small"
+                                  format="DD.MM.YYYY"
+                                  placeholder="с сегодня"
+                                  style={{ width: 130 }}
+                                  value={scheduleFrom[rk] ?? null}
+                                  onChange={v => setScheduleFrom(prev => ({ ...prev, [rk]: v }))}
+                                  onClick={e => e.stopPropagation()}
+                                />
+                              </div>
+                              <Button
+                                type="primary" size="small"
+                                loading={scheduleSaving.has(rk)}
+                                onClick={e => { e.stopPropagation(); saveSchedule(rd); }}
+                                style={{ marginLeft: 8 }}
+                              >
+                                Сохранить
+                              </Button>
+                            </div>
+                            {schedule && (
+                              <div style={{ fontSize: 11, color: '#888', marginTop: 8 }}>
+                                Текущая версия действует с {dayjs(schedule.validFrom).format('DD.MM.YYYY')}
+                                {schedule.validTo ? ` по ${dayjs(schedule.validTo).format('DD.MM.YYYY')}` : ''}.
+                                {' '}Если указать дату позже — эта версия закроется, а с новой даты начнёт действовать новый график.
+                                Прошлые недели в планировании останутся по старому.
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
             </table>
+          </div>
           )}
 
           {historicalItems.length > 0 && (
@@ -273,6 +407,7 @@ export default function CustomerContractDetailPage() {
                 {showHistory ? 'Скрыть историю тарифов' : `Показать историю тарифов (${historicalItems.length})`}
               </Button>
               {showHistory && (
+              <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 8 }}>
                   <thead>
                     <tr>
@@ -326,6 +461,7 @@ export default function CustomerContractDetailPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
               )}
             </div>
           )}

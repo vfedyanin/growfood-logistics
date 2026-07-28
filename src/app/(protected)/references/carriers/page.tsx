@@ -7,6 +7,7 @@ import DataTable from '@/components/DataTable';
 import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
+import CodeInput from '@/components/CodeInput';
 import { getCarriers, createCarrier, updateCarrier, deleteCarrier } from '@/lib/actions/references';
 
 export default function CarriersPage() {
@@ -61,7 +62,9 @@ export default function CarriersPage() {
         toolbar={<Space><ImportExportButtons resource="carriers" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать перевозчика' : 'Новый перевозчик'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:carrier">
-        <Form.Item name="code" label="Код" rules={[{ required: true }]}><Input disabled={!!editing} placeholder="DELLIN" /></Form.Item>
+        <Form.Item name="code" label="Код" rules={[{ required: true }]} extra={!editing ? 'Предлагается из названия, можно исправить' : undefined}>
+          <CodeInput key={editing?.id || 'new'} form={form} separator="" autoFill={!editing} disabled={!!editing} placeholder="DELLIN" />
+        </Form.Item>
         <Form.Item name="name" label="Название" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="inn" label="ИНН"><Input /></Form.Item>
         <Form.Item name="kpp" label="КПП"><Input /></Form.Item>

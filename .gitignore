@@ -43,3 +43,14 @@ references.json
 
 # рабочие файлы сессий (содержат секреты)
 SESSION_CONTEXT.txt
+
+# вывод dev-сервера
+dev_stdout.txt
+dev_stderr.txt
+
+# одноразовые диагностические дампы и запросы (содержат бизнес-данные)
+*_check.txt
+prisma/check_*.sql
+
+# отчёты и саммери для руководства (хранятся локально)
+SUMMARY_*.md

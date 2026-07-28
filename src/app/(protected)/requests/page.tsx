@@ -88,16 +88,31 @@ function TariffPreview({ tariff, pallets, discount, scope }: { tariff?: { method
 }
 
 // Поля одного плеча (используются в Form.List создания и в модалке груза)
-function LegFields({ name, restField, showPrice }: { name: number; restField: any; showPrice: boolean }) {
+// templateMode: в шаблоне конкретных дат нет — вместо них смещение в днях от
+// первого касания товара (X, X+1, X+2). При создании заявки из планирования
+// X = день, в чью ячейку вписали паллеты, дальше дата = X + смещение.
+function LegFields({ name, restField, showPrice, templateMode }: { name: number; restField: any; showPrice: boolean; templateMode?: boolean }) {
   return (
     <Space wrap size="small">
       <Form.Item {...restField} name={[name, 'pickupLocationId']} label="Забор"><LocationSelect style={{ width: 180 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'dropoffLocationId']} label="Выгрузка"><LocationSelect style={{ width: 180 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'directionId']} label="Направление"><DirectionSelect style={{ width: 180 }} /></Form.Item>
-      <Form.Item {...restField} name={[name, 'plannedPickupDate']} label="Дата забора"><DatePicker format="DD.MM.YYYY" /></Form.Item>
+      {templateMode ? (
+        <Form.Item {...restField} name={[name, 'pickupDayOffset']} label="День забора" initialValue={0}>
+          <InputNumber min={0} max={14} precision={0} addonBefore="X+" style={{ width: 96 }} />
+        </Form.Item>
+      ) : (
+        <Form.Item {...restField} name={[name, 'plannedPickupDate']} label="Дата забора"><DatePicker format="DD.MM.YYYY" /></Form.Item>
+      )}
       <Form.Item {...restField} name={[name, 'plannedPickupFrom']} label="с"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'plannedPickupTo']} label="до"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>
-      <Form.Item {...restField} name={[name, 'plannedDropoffDate']} label="Дата выгрузки"><DatePicker format="DD.MM.YYYY" /></Form.Item>
+      {templateMode ? (
+        <Form.Item {...restField} name={[name, 'dropoffDayOffset']} label="День выгрузки" initialValue={0}>
+          <InputNumber min={0} max={14} precision={0} addonBefore="X+" style={{ width: 96 }} />
+        </Form.Item>
+      ) : (
+        <Form.Item {...restField} name={[name, 'plannedDropoffDate']} label="Дата выгрузки"><DatePicker format="DD.MM.YYYY" /></Form.Item>
+      )}
       <Form.Item {...restField} name={[name, 'plannedDropoffFrom']} label="с"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'plannedDropoffTo']} label="до"><TimePicker format="HH:mm" minuteStep={15} placeholder="HH:mm" style={{ width: 95 }} /></Form.Item>
       {showPrice && <Form.Item {...restField} name={[name, 'cost']} label="Стоимость, ₽"><InputNumber min={0} style={{ width: 120 }} /></Form.Item>}
@@ -107,7 +122,7 @@ function LegFields({ name, restField, showPrice }: { name: number; restField: an
 }
 
 // Карточка одного груза в форме создания (вложенный список плеч)
-function CargoCard({ name, restField, onRemove, form, tariffMap, scope }: { name: number; restField: any; onRemove: () => void; form: any; tariffMap: Record<string, { method: string | null; amount: number }>; scope: string }) {
+function CargoCard({ name, restField, onRemove, form, tariffMap, scope, templateMode }: { name: number; restField: any; onRemove: () => void; form: any; tariffMap: Record<string, { method: string | null; amount: number }>; scope: string; templateMode?: boolean }) {
   const mode = Form.useWatch(['cargoes', name, 'pricingMode'], form) || 'CARGO';
   const locId = Form.useWatch(['cargoes', name, 'consigneeLocationId'], form);
   const pallets = Form.useWatch(['cargoes', name, 'pallets'], form);
@@ -142,7 +157,7 @@ function CargoCard({ name, restField, onRemove, form, tariffMap, scope }: { name
           <>
             {legFields.map(({ key, name: ln, ...lr }) => (
               <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
-                <LegFields name={ln} restField={lr} showPrice={mode === 'LEG'} />
+                <LegFields name={ln} restField={lr} showPrice={mode === 'LEG'} templateMode={templateMode} />
                 <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => removeLeg(ln)} />
               </div>
             ))}
@@ -175,6 +190,8 @@ export default function RequestsPage() {
   // шаблоны
   const [templates, setTemplates] = useState<any[]>([]);
   const [selTemplate, setSelTemplate] = useState<string | undefined>();
+  // Правка содержимого шаблона: конкретных дат нет, вместо них смещения X+n
+  const [templateMode, setTemplateMode] = useState(false);
   const [tplForm] = Form.useForm();
   const [tplSaveOpen, setTplSaveOpen] = useState(false);
 
@@ -246,8 +263,8 @@ export default function RequestsPage() {
     const tplId = searchParams.get('editTemplate');
     if (!tplId || editTemplateApplied.current || templates.length === 0) return;
     editTemplateApplied.current = true;
-    setEditing(null); setSelTemplate(undefined); form.resetFields();
-    form.setFieldsValue({ requestDate: dayjs(), cargoes: [] });
+    setEditing(null); setSelTemplate(undefined);
+    setTemplateMode(true);
     setOpen(true);
     applyTemplate(tplId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -256,7 +273,7 @@ export default function RequestsPage() {
   const refreshView = async (id: string) => setViewReq(await getRequest(id));
 
   const onAdd = () => {
-    setEditing(null); setSelTemplate(undefined); form.resetFields();
+    setEditing(null); setSelTemplate(undefined); setTemplateMode(false); form.resetFields();
     form.setFieldsValue({ requestDate: dayjs(), cargoes: [] });
     setOpen(true);
   };
@@ -291,16 +308,68 @@ export default function RequestsPage() {
     if (!timePart) return datePart.startOf('day').toISOString();
     return datePart.clone().hour(timePart.hour()).minute(timePart.minute()).second(0).millisecond(0).toISOString();
   };
-  const serializeLegs = (legs: any[]) => (legs || []).map((l: any) => ({
-    ...l,
-    plannedPickup: combineDT(l.plannedPickupDate, l.plannedPickupFrom),
-    plannedPickupTo: toTimeStr(l.plannedPickupTo),
-    plannedDropoff: combineDT(l.plannedDropoffDate, l.plannedDropoffFrom),
-    plannedDropoffTo: toTimeStr(l.plannedDropoffTo),
-  }));
+  // Время без даты в шаблоне хранится как ИСТИННЫЙ UTC-момент на служебной дате,
+  // ровно как в остальной системе (в БД plannedPickup — тоже UTC).
+  // Раньше сюда писались «настенные» часы, из-за чего при подстановке на дату
+  // в планировании получался сдвиг +3ч: 22:00 из шаблона превращалось в 01:00.
+  const timeOnlyISO = (t: any): string | null => {
+    if (!t) return null;
+    const d = typeof t === 'string' ? dayjs(t, 'HH:mm') : t;
+    if (!d.isValid()) return null;
+    return d.year(1970).month(0).date(1).second(0).millisecond(0).toISOString();
+  };
+  // Обратная операция к timeOnlyISO: время из шаблона → dayjs для TimePicker.
+  // Чтение и запись обязаны быть симметричны, иначе окно уезжает на смещение TZ
+  // при каждом цикле «открыл шаблон → сохранил» (был дрейф +3ч за правку).
+  // Теперь оба формата — момент времени, поэтому читаются одинаково:
+  //   "HH:mm"              → строка без зоны (поля «до»), как есть;
+  //   любой ISO с датой    → локальное время, как везде в приложении.
+  const tplTime = (v: any): any => {
+    if (!v) return null;
+    if (dayjs.isDayjs(v)) return v;
+    const s = String(v);
+    if (/^\d{1,2}:\d{2}$/.test(s)) return dayjs(s, 'HH:mm');
+    const d = dayjs(s);
+    return d.isValid() ? d : null;
+  };
+  // Смещение в днях от первого касания товара (задача #23).
+  // Если в форме есть конкретные даты — считаем разницу с датой забора первого
+  // плеча. Если дат нет (правка шаблона) — берём то, что ввели в поля X+n.
+  const dayDiff = (d: any, base: any) => {
+    if (!d || !base) return null;
+    const a = dayjs.isDayjs(d) ? d : dayjs(d);
+    const b = dayjs.isDayjs(base) ? base : dayjs(base);
+    if (!a.isValid() || !b.isValid()) return null;
+    return a.startOf('day').diff(b.startOf('day'), 'day');
+  };
+  const serializeLegs = (legs: any[]) => {
+    const arr = legs || [];
+    const baseDate = arr.map((l: any) => l.plannedPickupDate).find(Boolean) ?? null;
+    return arr.map((l: any) => {
+    const pickupDT = combineDT(l.plannedPickupDate, l.plannedPickupFrom);
+    const dropoffDT = combineDT(l.plannedDropoffDate, l.plannedDropoffFrom);
+    const pOff = dayDiff(l.plannedPickupDate, baseDate) ?? (l.pickupDayOffset ?? 0);
+    const dOff = dayDiff(l.plannedDropoffDate, baseDate) ?? (l.dropoffDayOffset ?? pOff);
+    return {
+      ...l,
+      pickupDayOffset: pOff,
+      dropoffDayOffset: dOff,
+      plannedPickup: pickupDT,
+      plannedPickupFrom: pickupDT ?? timeOnlyISO(l.plannedPickupFrom),
+      plannedPickupTo: toTimeStr(l.plannedPickupTo),
+      plannedDropoff: dropoffDT,
+      plannedDropoffFrom: dropoffDT ?? timeOnlyISO(l.plannedDropoffFrom),
+      plannedDropoffTo: toTimeStr(l.plannedDropoffTo),
+    };
+    });
+  };
   const serializeCargoes = (arr: any[]) => (arr || []).map((c: any) => ({ ...c, legs: serializeLegs(c.legs) }));
-  // Груз из БД (на существующей заявке) → формат данных шаблона
-  const dbCargoToTpl = (c: any) => ({
+  // Груз из БД (на существующей заявке) → формат данных шаблона.
+  // Смещения считаем от даты забора первого плеча этого груза.
+  const dbCargoToTpl = (c: any) => {
+    const legs = c.legs || [];
+    const baseDay = legs.map((l: any) => l.plannedPickup).find(Boolean) ?? null;
+    return {
     consigneeId: c.consigneeId ?? undefined,
     consigneeLocationId: c.consigneeLocationId ?? undefined,
     unitType: c.unitType || 'PALLET',
@@ -312,10 +381,12 @@ export default function RequestsPage() {
     pricingMode: c.pricingMode || 'CARGO',
     cost: c.cost != null ? Number(c.cost) : undefined,
     discount: c.discount != null ? Number(c.discount) : undefined,
-    legs: (c.legs || []).map((l: any) => ({
+    legs: legs.map((l: any) => ({
       pickupLocationId: l.pickupLocationId ?? undefined,
       dropoffLocationId: l.dropoffLocationId ?? undefined,
       directionId: l.directionId ?? undefined,
+      pickupDayOffset: dayDiff(l.plannedPickup, baseDay) ?? 0,
+      dropoffDayOffset: dayDiff(l.plannedDropoff, baseDay) ?? dayDiff(l.plannedPickup, baseDay) ?? 0,
       plannedPickupDate: l.plannedPickup ? new Date(l.plannedPickup).toISOString() : null,
       plannedPickupFrom: l.plannedPickup ? new Date(l.plannedPickup).toISOString() : null,
       plannedPickupTo: l.plannedPickupTo || null,
@@ -325,7 +396,8 @@ export default function RequestsPage() {
       cost: l.cost != null ? Number(l.cost) : undefined,
       discount: l.discount != null ? Number(l.discount) : undefined,
     })),
-  });
+    };
+  };
   const onSubmit = async () => {
     const v = await form.validateFields();
     const payload = {
@@ -412,6 +484,7 @@ export default function RequestsPage() {
     if (!id) return;
     const tpl = await getRequestTemplate(id);
     const d: any = tpl?.data || {};
+    form.resetFields();
     form.setFieldsValue({
       ...d,
       requestDate: null,
@@ -423,11 +496,11 @@ export default function RequestsPage() {
         legs: (c.legs || []).map((l: any) => ({
           ...l,
           plannedPickupDate: null,
-          plannedPickupFrom: l.plannedPickupFrom ? dayjs(l.plannedPickupFrom) : null,
-          plannedPickupTo: l.plannedPickupTo ? dayjs(l.plannedPickupTo, 'HH:mm') : null,
+          plannedPickupFrom: tplTime(l.plannedPickupFrom),
+          plannedPickupTo: tplTime(l.plannedPickupTo),
           plannedDropoffDate: null,
-          plannedDropoffFrom: l.plannedDropoffFrom ? dayjs(l.plannedDropoffFrom) : null,
-          plannedDropoffTo: l.plannedDropoffTo ? dayjs(l.plannedDropoffTo, 'HH:mm') : null,
+          plannedDropoffFrom: tplTime(l.plannedDropoffFrom),
+          plannedDropoffTo: tplTime(l.plannedDropoffTo),
         })),
       })),
     });
@@ -456,7 +529,12 @@ export default function RequestsPage() {
     catch (e: any) { message.error(e?.message || 'Ошибка'); }
   };
 
-  const reqSum = (r: any) => (r?.cargoes || []).reduce((s: number, c: any) => s + (c.finalCost != null ? Number(c.finalCost) : 0), 0);
+  // Сумма приходит с сервера уже с НДС (totalGross): в базе finalCost без НДС,
+  // пользователю показывается одно число — с НДС.
+  const reqSum = (r: any) =>
+    r?.totalGross != null
+      ? Number(r.totalGross)
+      : (r?.cargoes || []).reduce((s: number, c: any) => s + (c.finalCost != null ? Number(c.finalCost) : 0), 0);
 
   const columns = [
     { title: '№ заявки', dataIndex: 'requestNumber', key: 'requestNumber', width: 160 },
@@ -475,7 +553,7 @@ export default function RequestsPage() {
       return dates.length ? fmt(dates[dates.length - 1]) : '—';
     } },
     { title: 'Паллет', key: 'pallets', width: 80, render: (_: any, r: any) => { const t = (r.cargoes || []).reduce((s: number, c: any) => s + (c.pallets != null ? Number(c.pallets) : 0), 0); return t || '—'; } },
-    { title: 'Сумма', key: 'sum', render: (_: any, r: any) => rub(reqSum(r)) },
+    { title: 'Сумма с НДС', key: 'sum', render: (_: any, r: any) => rub(reqSum(r)) },
     { title: 'Статус', dataIndex: 'status', key: 'status', render: (s: string) => <Tag color={statusCfg[s]?.color}>{statusCfg[s]?.label || s}</Tag> },
     { title: 'Источник', key: 'source', width: 100, render: (_: any, r: any) => r.source === 'EMAIL_IMPORT' ? <Tag color="purple">import</Tag> : <Tag>вручную</Tag> },
     {
@@ -503,7 +581,7 @@ export default function RequestsPage() {
       const dropoff = fmtt(l.plannedDropoff) + (l.plannedDropoffTo ? `–${l.plannedDropoffTo}` : '');
       return `${pickup} / ${dropoff}`;
     }, responsive: ['lg'] as any },
-    { title: 'Итого', dataIndex: 'finalCost', key: 'fc', render: rub, responsive: ['lg'] as any },
+    { title: 'Итого', dataIndex: 'finalCostGross', key: 'fc', render: rub, responsive: ['lg'] as any },
     { title: 'Рейс', key: 'trip', render: (_: any, l: any) => l.tripCargoUnit?.trip ? <Tag color="green">{l.tripCargoUnit.trip.tripNumber} · {tripStatusCfg[l.tripCargoUnit.trip.status]}</Tag> : <Tag>Без рейса</Tag> },
     {
       title: '', key: 'x', width: 120,
@@ -528,7 +606,7 @@ export default function RequestsPage() {
       {(req.cargoes || []).length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет грузов" />}
       {(req.cargoes || []).map((c: any) => (
         <Card key={c.id} size="small" style={{ marginBottom: 8 }}
-          title={`${c.consigneeLocation?.name || c.consignee?.name || 'Груз'} · ${c.pallets ?? '—'}пал/${c.traysCount ?? '—'}лот · итого ${rub(c.finalCost)} · ${pricingLabel(c.pricingMode)}`}
+          title={`${c.consigneeLocation?.name || c.consignee?.name || 'Груз'} · ${c.pallets ?? '—'}пал/${c.traysCount ?? '—'}лот · итого ${rub(c.finalCostGross ?? c.finalCost)} · ${pricingLabel(c.pricingMode)}`}
           extra={canWrite && (
             <Space>
               <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditCargo(c)} />
@@ -614,7 +692,7 @@ export default function RequestsPage() {
               {(fields, { add, remove }) => (
                 <>
                   {fields.map(({ key, name, ...rest }) => (
-                    <CargoCard key={key} name={name} restField={rest} onRemove={() => remove(name)} form={form} tariffMap={tariffMap} scope={perTripScope} />
+                    <CargoCard key={key} name={name} restField={rest} onRemove={() => remove(name)} form={form} tariffMap={tariffMap} scope={perTripScope} templateMode={templateMode} />
                   ))}
                   <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add({ unitType: 'PALLET', pricingMode: 'CARGO', legs: [{}] })}>Добавить груз</Button>
                 </>

@@ -7,6 +7,7 @@ import DataTable from '@/components/DataTable';
 import ImportExportButtons from '@/components/ImportExportButtons';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
+import CodeInput from '@/components/CodeInput';
 import { getVerticals, createVertical, updateVertical, deleteVertical } from '@/lib/actions/references';
 
 const typeOptions = [
@@ -65,8 +66,8 @@ export default function VerticalsPage() {
         toolbar={<Space><ImportExportButtons resource="verticals" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать вертикаль' : 'Новая вертикаль'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing} draftKey="draft:vertical">
-        <Form.Item name="code" label="Код" rules={[{ required: true, message: 'Введите код' }]}>
-          <Input disabled={!!editing} placeholder="GROWFOOD" />
+        <Form.Item name="code" label="Код" rules={[{ required: true, message: 'Введите код' }]} extra={!editing ? 'Предлагается из названия, можно исправить' : undefined}>
+          <CodeInput key={editing?.code || 'new'} form={form} autoFill={!editing} disabled={!!editing} placeholder="GROWFOOD" />
         </Form.Item>
         <Form.Item name="name" label="Название" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="type" label="Тип" rules={[{ required: true }]}><Select options={typeOptions} /></Form.Item>
