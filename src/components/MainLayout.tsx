@@ -47,6 +47,7 @@ const menuItems: MenuItem[] = [
   getItem('Дашборд', '/dashboard', <DashboardOutlined />),
   getItem('Операции', '/operations', <CarOutlined />, [
     getItem('Заявки', '/requests'),
+    getItem('Импорт заявок', '/import-log'),
     getItem('Рейсы', '/operations/trips'),
     getItem('Груз', '/operations/cargo'),
   ]),
