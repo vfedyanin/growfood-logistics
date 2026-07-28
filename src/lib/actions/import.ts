@@ -4,8 +4,9 @@ import { prisma } from '@/lib/prisma';
 import { requireRole, requireAuth, getActorId, RoleName } from '@/lib/authz';
 import { serialize } from '@/lib/serialize';
 import { revalidatePath } from 'next/cache';
-import { importPdf } from '@/lib/import/runImport';
+import { importPdf, importStatus } from '@/lib/import/runImport';
 import type { RunImportResult } from '@/lib/import/runImport';
+import { runEmailImport } from '@/lib/import/runEmailImport';
 
 const W: RoleName[] = ['LOGISTICS_MANAGER', 'LAAS_MANAGER', 'OWN_DISPATCHER'];
 
@@ -31,13 +32,13 @@ export async function getImportLogs(limit = 50) {
   return serialize(rows);
 }
 
-function statusOf(r: RunImportResult): 'SUCCESS' | 'PARTIAL' | 'EMPTY' | 'ERROR' {
-  const created = r.created.length;
-  const hasErrors = r.errors.length > 0;
-  if (created > 0 && hasErrors) return 'PARTIAL';
-  if (created > 0) return 'SUCCESS';
-  if (hasErrors) return 'ERROR';
-  return 'EMPTY';
+// Ручной запуск проверки почты (та же логика, что и крон) — по кнопке оператора.
+export async function runEmailImportNow() {
+  await requireRole(W);
+  const actor = await getActorId();
+  const summary = await runEmailImport({ trigger: 'MANUAL', systemActorId: actor });
+  revalidatePath('/import-log');
+  return summary;
 }
 
 // Ручной запуск: загрузка PDF оператором → OCR → парсинг → создание заявок + запись в лог.
@@ -62,7 +63,7 @@ export async function runManualImport(formData: FormData) {
   let fatalError: string | null = null;
   try {
     result = await importPdf(buffer, customer.parserKey, { systemActorId: actor });
-    logStatus = statusOf(result);
+    logStatus = importStatus(result);
     message = `Создано ${result.created.length}, пропущено ${result.skipped.length}, ошибок ${result.errors.length}, предупреждений ${result.warnings.length}`;
     stage = result.ocrChars ? (result.created.length || result.skipped.length ? 'create' : 'parse') : 'ocr';
   } catch (e: any) {

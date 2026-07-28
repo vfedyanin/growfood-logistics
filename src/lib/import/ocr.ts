@@ -8,7 +8,12 @@ const VIEWPORT_SCALE = 3.0;
 
 export async function ocrPdf(pdfBuffer: Buffer): Promise<string> {
   const pages = await pdfToPng(pdfBuffer, { viewportScale: VIEWPORT_SCALE });
-  const worker = await createWorker('rus');
+  // langPath/cachePath через env — чтобы на Vercel бандлить rus.traineddata локально,
+  // а не тянуть с CDN в рантайме (по умолчанию tesseract.js грузит с CDN).
+  const worker = await createWorker('rus', 1, {
+    langPath: process.env.TESSERACT_LANG_PATH || undefined,
+    cachePath: process.env.TESSERACT_CACHE_PATH || undefined,
+  });
   try {
     let text = '';
     for (const page of pages) {

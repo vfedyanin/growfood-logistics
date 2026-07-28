@@ -5,6 +5,16 @@ import { createRequestsFromParsed, type ImportResult } from './createRequests';
 
 export type RunImportResult = ImportResult & { ocrChars: number; parserKey: string };
 
+// Итоговый статус прогона для лога.
+export function importStatus(r: ImportResult): 'SUCCESS' | 'PARTIAL' | 'EMPTY' | 'ERROR' {
+  const created = r.created.length;
+  const hasErrors = r.errors.length > 0;
+  if (created > 0 && hasErrors) return 'PARTIAL';
+  if (created > 0) return 'SUCCESS';
+  if (hasErrors) return 'ERROR';
+  return 'EMPTY';
+}
+
 export async function importPdf(
   pdfBuffer: Buffer,
   parserKey: string,
