@@ -5,7 +5,7 @@ import { Button, Select, Upload, Card, Table, Tag, Space, message, Modal, Typogr
 import { InboxOutlined, ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { usePermissions } from '@/hooks/usePermissions';
-import { getImportLogs, getImportCustomers, runManualImport } from '@/lib/actions/import';
+import { getImportLogs, getImportCustomers, runManualImport, runEmailImportNow } from '@/lib/actions/import';
 
 const { Text, Paragraph } = Typography;
 
@@ -28,7 +28,20 @@ export default function ImportLogPage() {
   const [selCustomer, setSelCustomer] = useState<string>();
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [checkingMail, setCheckingMail] = useState(false);
   const [detail, setDetail] = useState<any>(null);
+
+  const onCheckMail = async () => {
+    setCheckingMail(true);
+    try {
+      const s = await runEmailImportNow();
+      if (!s.configured) message.warning('Gmail не настроен (нет OAuth-кредов в окружении).');
+      else message.success(`Проверено контрагентов: ${s.customersChecked}, писем: ${s.emailsFound}, создано заявок: ${s.createdRequests}${s.errors.length ? `, ошибок: ${s.errors.length}` : ''}`);
+      load();
+    } catch (e: any) {
+      message.error(e?.message || 'Ошибка проверки почты');
+    } finally { setCheckingMail(false); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -109,7 +122,12 @@ export default function ImportLogPage() {
         )}
       </Card>
 
-      <Card size="small" title="Журнал импорта" extra={<Button size="small" icon={<ReloadOutlined />} onClick={load}>Обновить</Button>}>
+      <Card size="small" title="Журнал импорта" extra={
+        <Space>
+          {canWrite && <Button size="small" type="primary" loading={checkingMail} onClick={onCheckMail}>Проверить почту сейчас</Button>}
+          <Button size="small" icon={<ReloadOutlined />} onClick={load}>Обновить</Button>
+        </Space>
+      }>
         <Table size="small" rowKey="id" loading={loading} dataSource={logs} columns={columns} pagination={{ pageSize: 20 }} scroll={{ x: 900 }} />
       </Card>
 
