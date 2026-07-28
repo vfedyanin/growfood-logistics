@@ -305,6 +305,7 @@ export default function RequestDetailPage() {
         <Button icon={<ArrowLeftOutlined />} onClick={() => router.push('/requests')}>Назад</Button>
         <h2 style={{ margin: 0, fontSize: 20 }}>Заявка {req.requestNumber}</h2>
         <Tag color={statusCfg[req.status]?.color} style={{ fontSize: 13 }}>{statusCfg[req.status]?.label}</Tag>
+        {req.source === 'EMAIL_IMPORT' && <Tag color="purple" style={{ fontSize: 13 }}>import</Tag>}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {canWrite && (nextStatus[req.status] || []).map((s) => (
             <Popconfirm key={s} title={`Перевести в «${statusCfg[s]?.label}»?`} onConfirm={() => onStatus(s)}>
