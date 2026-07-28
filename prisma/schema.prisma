@@ -163,6 +163,10 @@ model Customer {
   phone         String?
   email         String?
   isActive      Boolean      @default(true)
+  // Авто-импорт заявок из писем (PDF). Включается только при заполненном email.
+  autoImportEnabled Boolean  @default(false)
+  importSince   DateTime?    // забирать только письма после этой даты (watermark по контрагенту)
+  parserKey     String?      // ключ парсера PDF для этого контрагента (напр. "korolevsky-vkus")
   notes         String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -188,6 +192,7 @@ model Customer {
   payments            Payment[]
   deliveryLocations   CustomerDeliveryLocation[]
   contractMemberships CustomerContractMember[]
+  importLogs          ImportLog[]
 }
 
 model CustomerDeliveryLocation {
@@ -686,6 +691,7 @@ model CustomerRequest {
   productCategory    ProductCategory?
   tempRegime         TempRegime?
   status             RequestStatus    @default(NEW)
+  source             RequestSource    @default(MANUAL)
   perTripScope       PerTripScope     @default(CARGO)
   notes              String?
   clientUpd          String?
@@ -719,6 +725,12 @@ enum RequestStatus {
   IN_TRANSIT
   DELIVERED
   CANCELLED
+}
+
+// Источник заявки: вручную оператором или авто-импорт из письма (PDF).
+enum RequestSource {
+  MANUAL
+  EMAIL_IMPORT
 }
 
 model QualityEvent {
@@ -1047,4 +1059,42 @@ model RequestTemplate {
   updatedById String?
 
   schedules DirectionSchedule[]
+}
+
+// ============================================================
+//  АВТО-ИМПОРТ ЗАЯВОК ИЗ ПИСЕМ (PDF)
+// ============================================================
+
+// Журнал прогонов импорта: проверка почты, OCR, парсинг, создание заявок.
+model ImportLog {
+  id             String         @id @default(cuid())
+  createdAt      DateTime       @default(now())
+  trigger        ImportTrigger  // как запущено: вручную / крон
+  customerId     String?
+  source         String?        // имя файла / тема письма / message-id
+  status         ImportStatus   // итог прогона
+  stage          String?        // где остановились: mail | ocr | parse | create
+  ocrChars       Int?
+  createdCount   Int            @default(0)
+  createdNumbers String[]       // номера созданных заявок
+  message        String?        // краткое человекочитаемое резюме
+  details        Json?          // полный результат: извлечённые данные, warnings, errors, skipped
+  createdById    String?
+
+  customer Customer? @relation(fields: [customerId], references: [id])
+
+  @@index([createdAt])
+  @@index([customerId])
+}
+
+enum ImportTrigger {
+  MANUAL
+  CRON
+}
+
+enum ImportStatus {
+  SUCCESS   // созданы заявки
+  PARTIAL   // часть создана, часть с ошибками
+  EMPTY     // писем/заявок к созданию нет (или все дубли)
+  ERROR     // ошибка почты/OCR/парсинга — ничего не создано
 }

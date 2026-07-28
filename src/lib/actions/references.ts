@@ -3,7 +3,7 @@
 import { prisma } from '@/lib/prisma';
 import { serialize } from '@/lib/serialize';
 import { requireAuth, requirePermission, getActorId } from '@/lib/authz';
-import { getCustomerPointTariffs } from '@/lib/pricing';
+import { getCustomerTariffMap } from '@/lib/pricing';
 import { revalidatePath } from 'next/cache';
 
 const W = 'references.write';
@@ -61,17 +61,24 @@ export async function getCustomers() {
   await requireAuth();
   return prisma.customer.findMany({ include: { vertical: true }, orderBy: { name: 'asc' } });
 }
+// Нормализация полей контрагента: дата импорта в Date, guard на авто-импорт.
+function normalizeCustomer(data: any) {
+  const d = { ...data };
+  if ('importSince' in d) d.importSince = d.importSince ? new Date(d.importSince) : null;
+  if (d.autoImportEnabled && !d.email) throw new Error('Авто-импорт можно включить только при заполненном Email');
+  return d;
+}
 export async function createCustomer(data: any) {
   await requirePermission(W);
   const actor = await getActorId();
-  const r = await prisma.customer.create({ data: { ...data, createdById: actor, updatedById: actor } });
+  const r = await prisma.customer.create({ data: { ...normalizeCustomer(data), createdById: actor, updatedById: actor } });
   revalidatePath('/references/customers');
   return r;
 }
 export async function updateCustomer(id: string, data: any) {
   await requirePermission(W);
   const actor = await getActorId();
-  const r = await prisma.customer.update({ where: { id }, data: { ...data, updatedById: actor } });
+  const r = await prisma.customer.update({ where: { id }, data: { ...normalizeCustomer(data), updatedById: actor } });
   revalidatePath('/references/customers');
   return r;
 }
@@ -96,7 +103,7 @@ export async function getCustomerDeliveryLocations(customerId: string) {
 export async function getCustomerTariffLocations(customerId: string) {
   await requireAuth();
   if (!customerId) return [];
-  const map = await getCustomerPointTariffs(customerId);
+  const map = await getCustomerTariffMap(customerId);
   return Array.from(map.entries()).map(([locationId, info]) => ({
     locationId,
     tariffMethod: info.method,

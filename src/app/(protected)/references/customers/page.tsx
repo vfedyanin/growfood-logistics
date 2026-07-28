@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Button, Form, Input, Select, Switch, Space, Popconfirm, Tag, message, Drawer, List, Tooltip, InputNumber } from 'antd';
+import { Button, Form, Input, Select, Switch, Space, Popconfirm, Tag, message, Drawer, List, Tooltip, InputNumber, DatePicker, Divider } from 'antd';
+import dayjs from 'dayjs';
 import { PlusOutlined, EditOutlined, DeleteOutlined, EnvironmentOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -28,6 +29,10 @@ const tariffMethodOptions = [
   { value: 'PER_PALLET', label: 'За паллет' },
   { value: 'PER_TRIP', label: 'За рейс' },
 ];
+// Реестр парсеров PDF по контрагентам (расширяется по мере подключения).
+const parserOptions = [
+  { value: 'korolevsky-vkus', label: 'КОРОЛЕВСКИЙ ВКУС' },
+];
 
 export default function CustomersPage() {
   const { can } = usePermissions();
@@ -37,6 +42,7 @@ export default function CustomersPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form] = Form.useForm();
+  const emailFilled = !!Form.useWatch('email', form);
 
   // Drawer точек выгрузки
   const [dlOpen, setDlOpen] = useState(false);
@@ -101,16 +107,17 @@ export default function CustomersPage() {
     }
   };
 
-  const onAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ partyRole: 'BOTH', customerType: 'EXTERNAL_COMPANY', isActive: true }); setOpen(true); };
-  const onEdit = (r: any) => { setEditing(r); form.setFieldsValue(r); setOpen(true); };
+  const onAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ partyRole: 'BOTH', customerType: 'EXTERNAL_COMPANY', isActive: true, autoImportEnabled: false }); setOpen(true); };
+  const onEdit = (r: any) => { setEditing(r); form.setFieldsValue({ ...r, importSince: r.importSince ? dayjs(r.importSince) : null }); setOpen(true); };
   const onDelete = async (id: string) => {
     try { await deleteCustomer(id); message.success('Удалено'); load(); }
     catch { message.error('Не удалось удалить (контрагент используется)'); }
   };
   const onSubmit = async () => {
     const v = await form.validateFields();
+    const payload = { ...v, importSince: v.importSince ? v.importSince.toISOString() : null };
     try {
-      if (editing) await updateCustomer(editing.id, v); else await createCustomer(v);
+      if (editing) await updateCustomer(editing.id, payload); else await createCustomer(payload);
       message.success('Сохранено'); setOpen(false); load();
     } catch (e: any) { message.error(e?.message || 'Ошибка сохранения'); }
   };
@@ -164,6 +171,21 @@ export default function CustomersPage() {
         <Form.Item name="email" label="Email"><Input /></Form.Item>
         <Form.Item name="notes" label="Заметки"><Input.TextArea rows={2} /></Form.Item>
         <Form.Item name="isActive" label="Активен" valuePropName="checked"><Switch /></Form.Item>
+
+        <Divider titlePlacement="left" style={{ marginTop: 8 }}>Авто-импорт заявок из писем</Divider>
+        <Form.Item name="autoImportEnabled" label="Включить авто-импорт" valuePropName="checked"
+          tooltip="Забирать заявки из писем этого контрагента (PDF во вложении). Доступно только при заполненном Email.">
+          <Switch disabled={!emailFilled} />
+        </Form.Item>
+        {!emailFilled && <div style={{ marginTop: -8, marginBottom: 8, color: '#faad14', fontSize: 12 }}>Заполните Email, чтобы включить авто-импорт.</div>}
+        <Form.Item name="importSince" label="Импорт с (дата/время)"
+          tooltip="Забирать только письма, полученные после этого момента (чтобы не тянуть старые).">
+          <DatePicker showTime format="DD.MM.YYYY HH:mm" style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item name="parserKey" label="Парсер PDF"
+          tooltip="Алгоритм разбора PDF для этого контрагента (у каждого своя форма).">
+          <Select allowClear options={parserOptions} placeholder="Выберите парсер" />
+        </Form.Item>
       </EntityForm>
 
       <Drawer

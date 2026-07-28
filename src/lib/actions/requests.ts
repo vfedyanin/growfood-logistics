@@ -73,17 +73,18 @@ function cargoCreateData(c: any, actor: string | null) {
     legs: { create: (c.legs || []).map((l: any, i: number) => legCreateData(l, i + 1, actor)) },
   };
 }
-// Поиск точечных тарифов и пересчёт итогов переехали в @/lib/pricing —
-// раньше здесь была заглушка (Direction не содержит destinationId, фолбэк шёл в
-// пустую CustomerDeliveryLocation), из-за чего TARIFF-грузы всегда считались в 0.
+// Карта тарифов и пересчёт итогов переехали в @/lib/pricing — их использует и
+// планирование при создании заявки из сетки. Логика поиска тарифа сохранена
+// как в main: по плательщику с фолбэком на заказчика, источник — clientTariff.
 
 // ============ List / Get ============
-export async function getRequests(filters?: { status?: RequestStatus; customerId?: string; verticalCode?: string; dateFrom?: string; dateTo?: string; deliveryFrom?: string; deliveryTo?: string }) {
+export async function getRequests(filters?: { status?: RequestStatus; customerId?: string; verticalCode?: string; source?: string; dateFrom?: string; dateTo?: string; deliveryFrom?: string; deliveryTo?: string }) {
   await requireAuth();
   const where: any = {};
   if (filters?.status) where.status = filters.status;
   if (filters?.customerId) where.customerId = filters.customerId;
   if (filters?.verticalCode) where.verticalCode = filters.verticalCode;
+  if (filters?.source) where.source = filters.source;
   const result = await prisma.customerRequest.findMany({
     where,
     include: { ...reqInclude, cargoes: { include: cargoInclude }, invoices: true },

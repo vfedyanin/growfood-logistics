@@ -1,58 +1,28 @@
-// Ценообразование заявок: поиск точечных тарифов и пересчёт итогов грузов.
+// Ценообразование заявок: пересчёт итогов грузов и НДС.
 //
-// Серверный модуль (НЕ 'use server') — импортируется из server actions, наружу
-// как action не выставляется. Здесь единственная реализация поиска тарифа:
-// раньше их было три (предпросмотр в форме, серверный расчёт, аналитика),
-// причём две из них были заглушками и возвращали пустоту.
+// Серверный модуль (НЕ 'use server') — импортируется из server actions и из
+// планирования, наружу как action не выставляется.
+//
+// Поиск клиентских тарифов живёт в @/lib/clientTariff (общий с дашбордом).
+// Здесь только карта с legacy-фолбэком, пересчёт итогов и НДС.
 
 import { prisma } from '@/lib/prisma';
-import { TariffInfo, toTariffInfo, tariffPrice } from '@/lib/tariff';
+import { tariffPrice } from '@/lib/tariff';
+import { getClientTariffMap } from '@/lib/clientTariff';
 
 const num = (v: any) => (v != null ? Number(v) : 0);
 
 /**
- * Точечные тарифы клиента: карта «локация выгрузки → тариф».
- *
- * Точечный тариф — это `Tariff` с заполненным `destinationLocationId` по договору
- * клиента. Клиент считается стороной договора, если он владелец (`customerId`)
- * либо участник (`members`) — иначе сводные договоры теряют тарифы.
- *
- * ВНИМАНИЕ на имена полей: у `Direction` — `originId`/`destinationId`,
- * у `Tariff` и `DirectionSchedule` — `originLocationId`/`destinationLocationId`.
- *
- * Среди действующих на дату берётся самый свежий по `validFrom`; если ни один не
- * действует — самый свежий вообще (иначе заявка «в прошлом» осталась бы без цены).
+ * Карта тарифов контрагента по точкам доставки: locationId → TariffInfo.
+ * Клиентские тарифы по `Tariff.destinationLocationId` плюс legacy-фолбэк
+ * на `CustomerDeliveryLocation` (сейчас таблица пустая, но фолбэк сохранён).
  */
-export async function getCustomerPointTariffs(customerId: string, onDate?: Date) {
-  const date = onDate || new Date();
-  const map = new Map<string, TariffInfo>();
-  if (!customerId) return map;
+export async function getCustomerTariffMap(partyId: string, requestDate?: Date) {
+  const map = await getClientTariffMap(partyId, requestDate || new Date());
 
-  const tariffs = await prisma.tariff.findMany({
-    where: {
-      destinationLocationId: { not: null },
-      customerContract: {
-        isActive: true,
-        OR: [{ customerId }, { members: { some: { customerId } } }],
-      },
-    },
-    include: { tiers: { include: { vehicleType: { select: { capacityPallets: true } } } } },
-    orderBy: { validFrom: 'desc' },
-  });
-
-  type Row = (typeof tariffs)[number];
-  const byDest = new Map<string, Row[]>();
-  for (const t of tariffs) {
-    const dest = t.destinationLocationId as string;
-    const arr = byDest.get(dest) || [];
-    arr.push(t);
-    byDest.set(dest, arr);
-  }
-
-  for (const [locationId, cands] of Array.from(byDest.entries())) {
-    const valid = cands.filter((t: Row) => t.validFrom <= date && (t.validTo == null || t.validTo >= date));
-    const pick = (valid.length ? valid : cands)[0];
-    if (pick) map.set(locationId, toTariffInfo(pick));
+  const locs = await prisma.customerDeliveryLocation.findMany({ where: { customerId: partyId } });
+  for (const l of locs) {
+    if (!map.has(l.locationId)) map.set(l.locationId, { method: l.tariffMethod, amount: num(l.tariffAmount), tiers: [] });
   }
 
   return map;
@@ -63,11 +33,11 @@ export async function getCustomerPointTariffs(customerId: string, onDate?: Date)
  *
  * Тарифы хранятся БЕЗ НДС: в карточке договора оператор вводит цену с НДС, а
  * `createContractTariff` приводит её к net через деление на (1 + ставка/100).
- * Пользователю же во всех суммах заявки показывается ОДНО число — с НДС.
+ * Пользователю во всех суммах заявки показывается ОДНО число — с НДС.
  *
  * Проверено 28.07.2026: все 29 договоров имеют ставку 22%, нулевых нет, ни у
  * одного клиента нет двух активных договоров с разными ставками — поэтому
- * ставка определяется по клиенту однозначно. Клиентов без НДС не бывает.
+ * ставка определяется по контрагенту однозначно. Клиентов без НДС не бывает.
  */
 export async function getCustomerVatRate(customerId: string): Promise<number> {
   if (!customerId) return 0;
@@ -103,7 +73,8 @@ export async function recomputeRequestFinals(requestId: string) {
   });
   if (!req) return;
 
-  const tariffs = await getCustomerPointTariffs(req.customerId, req.requestDate ?? undefined);
+  // Тариф ищем по плательщику (кто оплачивает доставку), с фолбэком на заказчика
+  const tariffs = await getCustomerTariffMap(req.payerId ?? req.customerId, req.requestDate ?? undefined);
   const tariffOf = (c: any) => (c.consigneeLocationId ? tariffs.get(c.consigneeLocationId) : undefined);
 
   const perTripCargoes = req.cargoes.filter(
@@ -123,6 +94,7 @@ export async function recomputeRequestFinals(requestId: string) {
       let base = 0;
       if (t?.method === 'PER_PALLET') base = tariffPrice(t, num(c.pallets));
       else if (t?.method === 'PER_TRIP') {
+        // PER_TRIP с тирами — цена по вместимости ТС; без тиров — фикс (или доля при scope=REQUEST)
         if (t.tiers.length > 0) base = tariffPrice(t, num(c.pallets));
         else base = req.perTripScope === 'REQUEST' ? perTripShare : num(t.amount);
       }
