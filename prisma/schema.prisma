@@ -190,6 +190,7 @@ model Customer {
   payments            Payment[]
   deliveryLocations   CustomerDeliveryLocation[]
   contractMemberships CustomerContractMember[]
+  importLogs          ImportLog[]
 }
 
 model CustomerDeliveryLocation {
@@ -1021,4 +1022,42 @@ model RequestTemplate {
   updatedAt   DateTime @updatedAt
   createdById String?
   updatedById String?
+}
+
+// ============================================================
+//  АВТО-ИМПОРТ ЗАЯВОК ИЗ ПИСЕМ (PDF)
+// ============================================================
+
+// Журнал прогонов импорта: проверка почты, OCR, парсинг, создание заявок.
+model ImportLog {
+  id             String         @id @default(cuid())
+  createdAt      DateTime       @default(now())
+  trigger        ImportTrigger  // как запущено: вручную / крон
+  customerId     String?
+  source         String?        // имя файла / тема письма / message-id
+  status         ImportStatus   // итог прогона
+  stage          String?        // где остановились: mail | ocr | parse | create
+  ocrChars       Int?
+  createdCount   Int            @default(0)
+  createdNumbers String[]       // номера созданных заявок
+  message        String?        // краткое человекочитаемое резюме
+  details        Json?          // полный результат: извлечённые данные, warnings, errors, skipped
+  createdById    String?
+
+  customer Customer? @relation(fields: [customerId], references: [id])
+
+  @@index([createdAt])
+  @@index([customerId])
+}
+
+enum ImportTrigger {
+  MANUAL
+  CRON
+}
+
+enum ImportStatus {
+  SUCCESS   // созданы заявки
+  PARTIAL   // часть создана, часть с ошибками
+  EMPTY     // писем/заявок к созданию нет (или все дубли)
+  ERROR     // ошибка почты/OCR/парсинга — ничего не создано
 }
