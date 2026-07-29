@@ -94,7 +94,7 @@ export default function ImportLogPage() {
         {!canWrite && <Alert type="info" showIcon message="Недостаточно прав для запуска импорта." style={{ marginBottom: 12 }} />}
         <Space wrap align="start">
           <div>
-            <div style={{ marginBottom: 4 }}><Text type="secondary">Контрагент (с настроенным парсером)</Text></div>
+            <div style={{ marginBottom: 4 }}><Text type="secondary">Контрагент</Text></div>
             <Select placeholder="Выберите контрагента" style={{ width: 260 }} value={selCustomer} onChange={setSelCustomer}
               options={customers.map((c) => ({ value: c.id, label: c.name }))} disabled={!canWrite} />
           </div>
@@ -115,7 +115,7 @@ export default function ImportLogPage() {
         {selCust && (
           <div style={{ marginTop: 12 }}>
             <Text type="secondary">
-              Парсер: <b>{selCust.parserKey}</b> · Авто-импорт: {selCust.autoImportEnabled ? 'вкл' : 'выкл'}
+              Парсер: <b>{selCust.parserKey || '— не задан (импорт недоступен)'}</b> · Авто-импорт: {selCust.autoImportEnabled ? 'вкл' : 'выкл'}
               {' · '}Забирать письма с: {selCust.importSince ? dt(selCust.importSince) : '— (не задано)'}
               {!selCust.email && ' · ⚠ email не заполнен'}
             </Text>
