@@ -10,11 +10,10 @@ import { runEmailImport } from '@/lib/import/runEmailImport';
 
 const W: RoleName[] = ['LOGISTICS_MANAGER', 'LAAS_MANAGER', 'OWN_DISPATCHER'];
 
-// Список контрагентов, у которых задан парсер (для формы ручной загрузки).
+// Все контрагенты для формы ручной загрузки. Наличие парсера проверяется при запуске импорта.
 export async function getImportCustomers() {
   await requireAuth();
   const rows = await prisma.customer.findMany({
-    where: { parserKey: { not: null } },
     select: { id: true, name: true, email: true, parserKey: true, autoImportEnabled: true, importSince: true },
     orderBy: { name: 'asc' },
   });
