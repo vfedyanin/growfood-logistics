@@ -135,7 +135,7 @@ export const IMPORT_RULES: Record<string, ImportRule> = {
 
     parties: {
       customer: { mode: 'contractor' },
-      payer: KV_PAYER_VARIANTS.B_BY_BRAND,  // ← ПЕРЕКЛЮЧАТЬ ЗДЕСЬ
+      payer: KV_PAYER_VARIANTS.A_CONTRACTOR, // подтверждено владельцем: платит отправитель письма
       shipper: { mode: 'byBrand' },         // грузоотправитель = юрлицо бренда, подтверждено
       consignee: { mode: 'byDestination' },
     },
