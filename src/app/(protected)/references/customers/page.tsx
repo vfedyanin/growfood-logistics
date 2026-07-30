@@ -32,6 +32,7 @@ const tariffMethodOptions = [
 // Реестр парсеров PDF по контрагентам (расширяется по мере подключения).
 const parserOptions = [
   { value: 'korolevsky-vkus', label: 'КОРОЛЕВСКИЙ ВКУС' },
+  { value: 'fermersky-supermarket', label: 'ФЕРМЕРСКИЙ СУПЕРМАРКЕТ' },
 ];
 
 export default function CustomersPage() {

@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { requireRole, requireAuth, getActorId, RoleName } from '@/lib/authz';
 import { serialize } from '@/lib/serialize';
 import { revalidatePath } from 'next/cache';
-import { importPdf, importStatus } from '@/lib/import/runImport';
+import { importPdf, importDocx, isDocx, importStatus } from '@/lib/import/runImport';
 import type { RunImportResult } from '@/lib/import/runImport';
 import { runEmailImport } from '@/lib/import/runEmailImport';
 
@@ -55,6 +55,7 @@ export async function runManualImport(formData: FormData) {
   if (!customer.parserKey) throw new Error(`У контрагента «${customer.name}» не задан парсер PDF`);
 
   const buffer = Buffer.from(await file.arrayBuffer());
+  const docx = isDocx(file.name || '', file.type);
 
   let result: RunImportResult | null = null;
   let logStatus: 'SUCCESS' | 'PARTIAL' | 'EMPTY' | 'ERROR' = 'ERROR';
@@ -62,7 +63,9 @@ export async function runManualImport(formData: FormData) {
   let message = '';
   let fatalError: string | null = null;
   try {
-    result = await importPdf(buffer, customer.parserKey, { systemActorId: actor });
+    result = docx
+      ? await importDocx(buffer, customer.parserKey, { systemActorId: actor })
+      : await importPdf(buffer, customer.parserKey, { systemActorId: actor });
     logStatus = importStatus(result);
     message = `Создано ${result.created.length}, пропущено ${result.skipped.length}, ошибок ${result.errors.length}, предупреждений ${result.warnings.length}`;
     stage = result.ocrChars ? (result.created.length || result.skipped.length ? 'create' : 'parse') : 'ocr';
