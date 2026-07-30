@@ -57,7 +57,7 @@ export async function runManualImport(formData: FormData) {
   const buffer = Buffer.from(await file.arrayBuffer());
 
   let result: RunImportResult | null = null;
-  let logStatus: 'SUCCESS' | 'PARTIAL' | 'EMPTY' | 'ERROR' = 'ERROR';
+  let logStatus: 'SUCCESS' | 'PARTIAL' | 'EMPTY' | 'DUPLICATES' | 'ERROR' = 'ERROR';
   let stage: string | null = 'create';
   let message = '';
   let fatalError: string | null = null;
