@@ -51,7 +51,7 @@ export default function ImportLogPage() {
 
   const onRun = async () => {
     if (!selCustomer) { message.warning('Выберите контрагента'); return; }
-    if (!file) { message.warning('Приложите PDF-файл'); return; }
+    if (!file) { message.warning('Приложите файл (PDF или DOCX)'); return; }
     setSubmitting(true);
     try {
       const fd = new FormData();
@@ -90,7 +90,7 @@ export default function ImportLogPage() {
 
   return (
     <>
-      <Card size="small" style={{ marginBottom: 16 }} title="Ручной импорт из PDF">
+      <Card size="small" style={{ marginBottom: 16 }} title="Ручной импорт (PDF / DOCX)">
         {!canWrite && <Alert type="info" showIcon message="Недостаточно прав для запуска импорта." style={{ marginBottom: 12 }} />}
         <Space wrap align="start">
           <div>
@@ -99,11 +99,12 @@ export default function ImportLogPage() {
               options={customers.map((c) => ({ value: c.id, label: c.name }))} disabled={!canWrite} />
           </div>
           <div>
-            <div style={{ marginBottom: 4 }}><Text type="secondary">PDF-файл заявки</Text></div>
-            <Upload.Dragger accept="application/pdf" multiple={false} maxCount={1} beforeUpload={(f) => { setFile(f); return false; }}
+            <div style={{ marginBottom: 4 }}><Text type="secondary">Файл заявки (PDF или DOCX)</Text></div>
+            <Upload.Dragger accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              multiple={false} maxCount={1} beforeUpload={(f) => { setFile(f); return false; }}
               fileList={file ? [{ uid: '1', name: file.name } as any] : []} onRemove={() => setFile(null)} disabled={!canWrite}
               style={{ width: 320 }}>
-              <p style={{ margin: 0 }}><InboxOutlined /> Перетащите PDF сюда или нажмите</p>
+              <p style={{ margin: 0 }}><InboxOutlined /> Перетащите PDF или DOCX сюда или нажмите</p>
             </Upload.Dragger>
           </div>
           <div style={{ paddingTop: 20 }}>
