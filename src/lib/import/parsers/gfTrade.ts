@@ -90,7 +90,6 @@ export function parseGfTrade(ocrText: string): ParsedImport {
   // → вес → «M паллет». Служебные строки исключаем.
   const stopRe = /^(?:\d\s+)?([А-ЯЁ][А-Яа-яёЁ.\- ]{2,32})$/;
   const skipRe = /продукт|наименован|номер\s*заказ|темп|вес|объ[её]м|количеств|стоимост|груз|европал|паллет|услови|адрес|контакт|склад|дата|время/i;
-  const weightRe = /^(\d+(?:[.,]\d+)?)$/;   // «150», «103,00», «0,334»
   const palletRe = /(\d+)\s*(?:европал|паллет|мест)/i;
 
   type Stop = { city: string; destinationName: string; weightKg: number | null; pallets: number };
@@ -101,22 +100,30 @@ export function parseGfTrade(ocrText: string): ParsedImport {
   for (const l of cargoBlock) {
     const sm = l.match(stopRe);
     if (sm && !skipRe.test(l)) { const city = titleCity(sm[1].replace(/[.\-]/g, ' ').trim()); cur = { city, destinationName: city, weightKg: null, pallets: 0 }; stops.push(cur); continue; }
-    const wm = l.match(weightRe);
-    if (wm) { const w = weightToKg(num(wm[1])); allWeights.push(w); if (cur && cur.weightKg == null) cur.weightKg = w; continue; }
     const pm = l.match(palletRe);
     if (pm) { const p = Number(pm[1]); allPallets.push(p); if (cur && !cur.pallets) cur.pallets = p; continue; }
+    // Вес: строка-число; пробелы внутри убираем («149. 185» → 149.185).
+    const norm = l.replace(/\s+/g, '');
+    if (/^\d+(?:[.,]\d+)?$/.test(norm)) { const w = weightToKg(num(norm)); allWeights.push(w); if (cur && cur.weightKg == null) cur.weightKg = w; continue; }
   }
 
-  // Фолбэк для одностоповых без метки в «Номер заказа» (Крафт, Поляна): получатель
-  // «Самокат ГОРОД» из региона + вес/паллеты из блока груза по индексу.
+  // Фолбэк для одностоповых без метки в «Номер заказа» (Крафт, Корона, Поляна):
+  // получатели из секции выгрузки (не только «Самокат» — ещё Пятёрочка/Перекрёсток/…),
+  // вес/паллеты из блока груза по индексу.
   if (!stops.length) {
-    const dests = Array.from(region.matchAll(/самокат\s+([А-ЯЁ][а-яё]+)/gi)).map((m) => ({ full: `Самокат ${titleCity(m[1])}`, city: titleCity(m[1]) }));
-    if (dests.length) {
-      dests.forEach((d, i) => stops.push({ city: d.city, destinationName: d.full, weightKg: allWeights[i] ?? allWeights[0] ?? null, pallets: allPallets[i] ?? allPallets[0] ?? 0 }));
-    } else {
-      const cityM = region.match(/выгрузк[аи][\s\S]{0,140}?г\.?\s*([А-ЯЁ][а-яё]+)/i);
-      if (cityM) stops.push({ city: titleCity(cityM[1]), destinationName: `Самокат ${titleCity(cityM[1])}`, weightKg: allWeights[0] ?? null, pallets: allPallets[0] ?? 0 });
-    }
+    const delStart = lines.findIndex((l) => /грузополучател|дата\s+выгрузк/i.test(l));
+    const delLines = delStart >= 0 ? lines.slice(delStart, startIdx >= 0 ? startIdx : lines.length) : lines;
+    const consRe = /самокат|пят[её]роч|перекр[её]ст|магнит|умный\s+ритейл|ритейл|\bрц\b|\bтд\b/i;
+    const dests = Array.from(new Set(delLines
+      .filter((l) => consRe.test(l) && !/адрес|контакт|дата|время|грузополучател/i.test(l))
+      .map((l) => l.replace(/\s+/g, ' ').trim())));
+    dests.forEach((d, i) => {
+      // Обрезаем хвост-адрес, если он попал в ту же строку.
+      const clean = d.split(/\s+(?=\d{5,6}\b|область|обл\.?\b|район|р-н|ул\.|д\.\s*\d)/i)[0].trim();
+      const cm = clean.match(/самокат\s+([А-ЯЁ][а-яё]+)/i);
+      const city = cm ? titleCity(cm[1]) : clean.split(/[\s(]/)[0];
+      stops.push({ city, destinationName: clean, weightKg: allWeights[i] ?? allWeights[0] ?? null, pallets: allPallets[i] ?? allPallets[0] ?? 0 });
+    });
   }
 
   if (!stops.length) warnings.push('Не найдено ни одной строки груза (метка стопа) — проверьте раскладку OCR.');
