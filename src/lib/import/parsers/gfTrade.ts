@@ -89,21 +89,34 @@ export function parseGfTrade(ocrText: string): ParsedImport {
   // Стопы из таблицы груза: метка (нумерованная «1 Пушкино» или именованная «Перекрёсток»)
   // → вес → «M паллет». Служебные строки исключаем.
   const stopRe = /^(?:\d\s+)?([А-ЯЁ][А-Яа-яёЁ.\- ]{2,32})$/;
-  const skipRe = /продукт|наименован|номер\s*заказ|темп|вес|объ[её]м|количеств|стоимост|груз|европал|паллет|услови|адрес|контакт/i;
-  const weightRe = /^(\d+[.,]\d+)$/;
+  const skipRe = /продукт|наименован|номер\s*заказ|темп|вес|объ[её]м|количеств|стоимост|груз|европал|паллет|услови|адрес|контакт|склад|дата|время/i;
+  const weightRe = /^(\d+(?:[.,]\d+)?)$/;   // «150», «103,00», «0,334»
   const palletRe = /(\d+)\s*(?:европал|паллет|мест)/i;
 
-  type Stop = { city: string; weightKg: number | null; pallets: number };
+  type Stop = { city: string; destinationName: string; weightKg: number | null; pallets: number };
   const stops: Stop[] = [];
+  const allWeights: (number | null)[] = [];
+  const allPallets: number[] = [];
   let cur: Stop | null = null;
   for (const l of cargoBlock) {
     const sm = l.match(stopRe);
-    if (sm && !skipRe.test(l)) { cur = { city: titleCity(sm[1].replace(/[.\-]/g, ' ').trim()), weightKg: null, pallets: 0 }; stops.push(cur); continue; }
-    if (!cur) continue;
+    if (sm && !skipRe.test(l)) { const city = titleCity(sm[1].replace(/[.\-]/g, ' ').trim()); cur = { city, destinationName: city, weightKg: null, pallets: 0 }; stops.push(cur); continue; }
     const wm = l.match(weightRe);
-    if (wm && cur.weightKg == null) { cur.weightKg = weightToKg(num(wm[1])); continue; }
+    if (wm) { const w = weightToKg(num(wm[1])); allWeights.push(w); if (cur && cur.weightKg == null) cur.weightKg = w; continue; }
     const pm = l.match(palletRe);
-    if (pm && !cur.pallets) { cur.pallets = Number(pm[1]); continue; }
+    if (pm) { const p = Number(pm[1]); allPallets.push(p); if (cur && !cur.pallets) cur.pallets = p; continue; }
+  }
+
+  // Фолбэк для одностоповых без метки в «Номер заказа» (Крафт, Поляна): получатель
+  // «Самокат ГОРОД» из региона + вес/паллеты из блока груза по индексу.
+  if (!stops.length) {
+    const dests = Array.from(region.matchAll(/самокат\s+([А-ЯЁ][а-яё]+)/gi)).map((m) => ({ full: `Самокат ${titleCity(m[1])}`, city: titleCity(m[1]) }));
+    if (dests.length) {
+      dests.forEach((d, i) => stops.push({ city: d.city, destinationName: d.full, weightKg: allWeights[i] ?? allWeights[0] ?? null, pallets: allPallets[i] ?? allPallets[0] ?? 0 }));
+    } else {
+      const cityM = region.match(/выгрузк[аи][\s\S]{0,140}?г\.?\s*([А-ЯЁ][а-яё]+)/i);
+      if (cityM) stops.push({ city: titleCity(cityM[1]), destinationName: `Самокат ${titleCity(cityM[1])}`, weightKg: allWeights[0] ?? null, pallets: allPallets[0] ?? 0 });
+    }
   }
 
   if (!stops.length) warnings.push('Не найдено ни одной строки груза (метка стопа) — проверьте раскладку OCR.');
@@ -126,7 +139,7 @@ export function parseGfTrade(ocrText: string): ParsedImport {
     };
     return {
       city: s.city,
-      destinationName: s.city, // метка стопа; сопоставление с точкой — через реестр/алиасы
+      destinationName: s.destinationName, // метка стопа/получатель; сопоставление — через реестр/алиасы
       deliveryDate: dd ? toIso(dd) : null,
       deliveryTimeFrom: delT.from,
       deliveryTimeTo: delT.to,
