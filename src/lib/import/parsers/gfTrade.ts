@@ -54,10 +54,12 @@ export function parseGfTrade(ocrText: string): ParsedImport {
   const lines = cutIdx > 0 ? allLines.slice(0, cutIdx) : allLines;
   const region = lines.join('\n');
 
-  // Дата документа: «29» 07 2026 г
-  const dm = region.match(/[«"'”]\s*(\d{1,2})\s*[»"'”]\s*(\d{2})\b/);
+  // Дата документа: «29» 07 2026 г  или  «03» августа 2026 г (месяц словом).
+  const MON: Record<string, string> = { янв: '01', фев: '02', мар: '03', апр: '04', мая: '05', июн: '06', июл: '07', авг: '08', сен: '09', окт: '10', ноя: '11', дек: '12' };
+  const dm = region.match(/[«"'”]\s*(\d{1,2})\s*[»"'”]\s*([а-яё]{3,}|\d{2})/i);
   const ym = region.match(/(20\d{2})\s*г/);
-  const documentDate = dm && ym ? toIso(`${dm[1].padStart(2, '0')}.${dm[2]}.${ym[1]}`) : null;
+  const mm = dm ? (/^\d{2}$/.test(dm[2]) ? dm[2] : (MON[dm[2].toLowerCase().slice(0, 3)] ?? null)) : null;
+  const documentDate = dm && ym && mm ? toIso(`${dm[1].padStart(2, '0')}.${mm}.${ym[1]}`) : null;
   if (!documentDate) warnings.push('Не удалось распознать дату документа.');
 
   // Клиент = ИНН при метке «ИНН», не равный исполнителю. Ищем во всём тексте.
@@ -67,7 +69,7 @@ export function parseGfTrade(ocrText: string): ParsedImport {
 
   // Даты и интервалы времени по порядку: [0] — погрузка, далее — выгрузки.
   const dates = Array.from(region.matchAll(/\b(\d{2}\.\d{2}\.\d{4})\b/g)).map((m) => m[1]);
-  const times = Array.from(region.matchAll(/(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})/g)).map((m) => `${m[1]}-${m[2]}`);
+  const times = Array.from(region.matchAll(/(\d{1,2}:\d{2})(?:\s*[-–—]\s*(\d{1,2}:\d{2}))?/g)).map((m) => (m[2] ? `${m[1]}-${m[2]}` : m[1]));
   const pickupDate = dates[0] ? toIso(dates[0]) : null;
   const pickupT = parseTimeRange(times[0]);
   const deliveryDates = dates.slice(1);
@@ -83,7 +85,7 @@ export function parseGfTrade(ocrText: string): ParsedImport {
   if (endIdx < 0) endIdx = lines.length;
   const cargoBlock = startIdx >= 0 ? lines.slice(startIdx, endIdx) : lines;
   const cargoText = cargoBlock.join('\n');
-  const tempM = cargoText.match(/([+\-])\s*\d{1,2}\s*[-–+]\s*\+?\s*\d{1,2}/);
+  const tempM = cargoText.match(/([+\-])\s*\d{1,2}\s*°?[СCсc]?\s*[-–]?\s*([+\-])\s*\d{1,2}/);
   const tempRegime: string | null = tempM ? (tempM[1] === '-' ? 'FROZEN' : 'COOLED') : null;
 
   // Стопы из таблицы груза: метка (нумерованная «1 Пушкино» или именованная «Перекрёсток»)
@@ -103,8 +105,11 @@ export function parseGfTrade(ocrText: string): ParsedImport {
     const pm = l.match(palletRe);
     if (pm) { const p = Number(pm[1]); allPallets.push(p); if (cur && !cur.pallets) cur.pallets = p; continue; }
     // Вес: строка-число; пробелы внутри убираем («149. 185» → 149.185).
+    // Вес: явное «150 кг», либо число ≤4 цифр (чтобы не спутать с 10-значным номером заказа).
+    const wKg = l.match(/(\d+(?:[.,]\d+)?)\s*кг(?![а-яё])/i);
+    if (wKg) { const w = weightToKg(num(wKg[1])); allWeights.push(w); if (cur && cur.weightKg == null) cur.weightKg = w; continue; }
     const norm = l.replace(/\s+/g, '');
-    if (/^\d+(?:[.,]\d+)?$/.test(norm)) { const w = weightToKg(num(norm)); allWeights.push(w); if (cur && cur.weightKg == null) cur.weightKg = w; continue; }
+    if (/^\d{1,4}(?:[.,]\d+)?$/.test(norm)) { const w = weightToKg(num(norm)); allWeights.push(w); if (cur && cur.weightKg == null) cur.weightKg = w; continue; }
   }
 
   // Фолбэк для одностоповых без метки в «Номер заказа» (Крафт, Корона, Поляна):
