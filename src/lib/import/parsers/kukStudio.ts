@@ -6,7 +6,7 @@
 // контрагента. Проверено на тексте docx; на реальном OCR Vision (если придёт сканом) сверить.
 import type { ParsedImport, ParsedRequestDraft, ParsedCargoLine } from '../types';
 
-const KUK_INN = ''; // ← ЗАПОЛНИТЬ: ИНН ООО «КУК СТУДИО» (в документе его нет)
+const KUK_INN = '9718146041'; // ИНН ООО «КУК СТУДИО» (в документе отсутствует, задан вручную)
 
 const titleCity = (raw: string): string =>
   raw.trim().toLowerCase().replace(/(^|[\s-])([а-яё])/g, (_m, s, c) => s + c.toUpperCase());
