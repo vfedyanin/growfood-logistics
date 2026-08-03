@@ -2,10 +2,12 @@
 import type { ParserFn } from '../types';
 import { parseKorolevskyVkus } from './korolevskyVkus';
 import { parseGfTrade } from './gfTrade';
+import { parseKukStudio } from './kukStudio';
 
 export const PARSERS: Record<string, ParserFn> = {
   'korolevsky-vkus': parseKorolevskyVkus,
   'gf-trade': parseGfTrade,
+  'kuk-studio': parseKukStudio,
 };
 
 export function getParser(parserKey: string | null | undefined): ParserFn | null {
