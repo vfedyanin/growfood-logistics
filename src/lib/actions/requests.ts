@@ -419,11 +419,21 @@ export async function getAllTripOptions() {
 }
 
 // ============ Плечи грузов (страница «Груз») ============
-export async function getAllCargoLegs(filters?: { tripId?: string; unassigned?: boolean; customerId?: string; pickupFrom?: string; pickupTo?: string; dropoffFrom?: string; dropoffTo?: string }) {
+export async function getAllCargoLegs(filters?: {
+  tripId?: string; unassigned?: boolean; customerId?: string;
+  pickupFrom?: string; pickupTo?: string; dropoffFrom?: string; dropoffTo?: string;
+  tripStatus?: string;
+}) {
   await requireAuth();
   const where: any = {};
+  // «Без рейса» — это отсутствие привязки, а не статус рейса, поэтому отдельная ветка.
   if (filters?.unassigned) where.tripCargoUnitId = null;
-  else if (filters?.tripId) where.tripCargoUnit = { tripId: filters.tripId };
+  else {
+    const tcu: any = {};
+    if (filters?.tripId) tcu.tripId = filters.tripId;
+    if (filters?.tripStatus) tcu.trip = { status: filters.tripStatus };
+    if (Object.keys(tcu).length) where.tripCargoUnit = tcu;
+  }
   if (filters?.customerId) where.cargo = { request: { customerId: filters.customerId } };
   if (filters?.pickupFrom || filters?.pickupTo) {
     where.plannedPickup = {};
