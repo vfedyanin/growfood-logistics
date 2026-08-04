@@ -51,13 +51,57 @@ export async function createRequestsFromParsed(
   const contract = await prisma.customerContract.findFirst({ where: { OR: [{ customerId: customer.id }, { members: { some: { customerId: customer.id } } }] }, select: { id: true } });
   if (!contract) result.warnings.push('У контрагента нет договора — авто-цена (finalCost) не будет рассчитана.');
 
-  const locs = await prisma.location.findMany({ select: { id: true, name: true } });
-  const resolve = makeResolver(locs);
+  const locs = await prisma.location.findMany({ select: { id: true, name: true, city: true } });
+  const resolve = makeResolver(locs.map((l) => ({ id: l.id, name: l.name })));
+
+  // Индекс городов реестра — чтобы резолвить точку по знакомому городу из текста, когда
+  // имя точки не нашлось (кривой OCR склеивает получателя/адрес в кашу).
+  const cityIndex = new Map<string, { display: string; locs: { id: string; name: string }[] }>();
+  for (const l of locs) {
+    const c = (l.city ?? '').trim();
+    if (!c) continue;
+    const key = c.toLowerCase();
+    if (!cityIndex.has(key)) cityIndex.set(key, { display: c, locs: [] });
+    cityIndex.get(key)!.locs.push({ id: l.id, name: l.name });
+  }
+  // Основа слова — отсекаем окончание для склонений: «воронежу»→«воронеж», «москве»→«москв».
+  const cityStem = (s: string) => s.toLowerCase().replace(/[аеёиійоуыьъэюя]+$/, '');
+  // Города реестра, встретившиеся в тексте (по основе слова, регистронезависимо).
+  const citiesInText = (txt: string): string[] => {
+    const words = txt.toLowerCase().split(/[^а-яё]+/).filter((w) => w.length >= 4).map(cityStem);
+    const found: string[] = [];
+    for (const key of Array.from(cityIndex.keys())) {
+      const cs = cityStem(key);
+      if (cs.length >= 4 && words.some((w) => w.startsWith(cs))) found.push(key);
+    }
+    return found;
+  };
   // Клиентские тарифы плательщика по точке — для авто-цены (finalCost груза)
   const tariffMap = await getClientTariffMap(customer.id, parsed.documentDate ? new Date(parsed.documentDate) : new Date());
 
   for (const r of parsed.requests) {
-    const dest = resolve(r.destinationName);
+    let dest = resolve(r.destinationName);
+    // Резолв по городу: имя точки не нашлось, но в тексте блока выгрузки есть знакомый город.
+    // Один город → одна точка = берём; несколько точек в городе или ноль/несколько городов —
+    // честная ошибка с фрагментом (не угадываем).
+    if (!dest && r.destinationText) {
+      const cities = citiesInText(r.destinationText);
+      const frag = r.destinationText.slice(0, 200);
+      if (cities.length === 1 && cityIndex.get(cities[0])!.locs.length === 1) {
+        const entry = cityIndex.get(cities[0])!;
+        dest = entry.locs[0];
+        result.warnings.push(`Точка определена по городу «${entry.display}» из текста: ${dest.name}.`);
+      } else if (cities.length === 1) {
+        const entry = cityIndex.get(cities[0])!;
+        result.skipped.push({ destination: r.destinationName, reason: `город «${entry.display}»: в реестре ${entry.locs.length} точки — уточните` });
+        result.errors.push(`Город «${entry.display}» найден, но в реестре ${entry.locs.length} точки (${entry.locs.map((x) => x.name).join(', ')}) — уточните. Текст: «${frag}»`);
+        continue;
+      } else {
+        result.skipped.push({ destination: r.destinationName, reason: `пункт назначения не определён (городов найдено: ${cities.length})` });
+        result.errors.push(`Не удалось определить пункт назначения (совпадений городов: ${cities.length}). Текст: «${frag}»`);
+        continue;
+      }
+    }
     if (!dest) { result.skipped.push({ destination: r.destinationName, reason: 'точка назначения не найдена в справочнике' }); result.errors.push(`Точка «${r.destinationName}» не найдена — заявка не создана.`); continue; }
     const pickup = resolve(r.pickupName);
     if (!pickup) { result.skipped.push({ destination: r.destinationName, reason: `точка забора «${r.pickupName}» не найдена` }); result.errors.push(`Точка забора «${r.pickupName}» не найдена — заявка на ${dest.name} не создана.`); continue; }

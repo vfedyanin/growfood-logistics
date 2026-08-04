@@ -34,6 +34,8 @@ const parserOptions = [
   { value: 'korolevsky-vkus', label: 'КОРОЛЕВСКИЙ ВКУС' },
   { value: 'polyana', label: 'ПОЛЯНА' },
   { value: 'fermersky-supermarket', label: 'ФЕРМЕРСКИЙ СУПЕРМАРКЕТ' },
+  { value: 'gf-trade', label: 'ГФ ТРЕЙД (универсальный)' },
+  { value: 'kuk-studio', label: 'КУК СТУДИО (РЦ Х5)' },
 ];
 
 export default function CustomersPage() {
