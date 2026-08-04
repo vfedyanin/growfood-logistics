@@ -33,6 +33,7 @@ const tariffMethodOptions = [
 const parserOptions = [
   { value: 'korolevsky-vkus', label: 'КОРОЛЕВСКИЙ ВКУС' },
   { value: 'polyana', label: 'ПОЛЯНА' },
+  { value: 'fermersky-supermarket', label: 'ФЕРМЕРСКИЙ СУПЕРМАРКЕТ' },
 ];
 
 export default function CustomersPage() {
