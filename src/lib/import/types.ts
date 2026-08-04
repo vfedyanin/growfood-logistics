@@ -26,6 +26,8 @@ export type ParsedRequestDraft = {
   tempRegime?: string | null;
   cargoLines: ParsedCargoLine[];
   notes: string;                   // бренды + № заказов
+  destinationText?: string | null; // сырой текст блока выгрузки — для резолва точки по городу,
+                                   // когда имя точки не нашлось в реестре (кривой OCR)
 };
 
 // Результат парсинга одного PDF.

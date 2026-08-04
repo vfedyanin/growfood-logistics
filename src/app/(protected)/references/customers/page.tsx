@@ -32,6 +32,8 @@ const tariffMethodOptions = [
 // Реестр парсеров PDF по контрагентам (расширяется по мере подключения).
 const parserOptions = [
   { value: 'korolevsky-vkus', label: 'КОРОЛЕВСКИЙ ВКУС' },
+  { value: 'gf-trade', label: 'ГФ ТРЕЙД (универсальный)' },
+  { value: 'kuk-studio', label: 'КУК СТУДИО (РЦ Х5)' },
 ];
 
 export default function CustomersPage() {
