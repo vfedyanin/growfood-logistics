@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button, InputNumber, Spin, Typography, Tooltip, Badge } from 'antd';
-import { LeftOutlined, RightOutlined, CheckOutlined } from '@ant-design/icons';
+import {
+  LeftOutlined, RightOutlined, CheckOutlined, DownOutlined,
+  CheckCircleFilled, ExclamationCircleFilled, CloseCircleFilled,
+} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import 'dayjs/locale/ru';
 import isoWeek from 'dayjs/plugin/isoWeek';
@@ -35,6 +38,15 @@ type Schedule = {
   requestTemplate: { id: string; name: string } | null;
   // Направление из первого магистрального плеча шаблона (считается на сервере)
   magistralDirection: { id: string; code: string; name: string | null; originName: string | null; destinationName: string | null } | null;
+  // Плечи ПОСЛЕ магистрального: перевозки из транзитного города (Казань → Ижевск).
+  // Тот же груз и та же заявка, но другая машина — показываем отдельной группой,
+  // только для чтения. Ввод остаётся в городе отправления.
+  onward: {
+    directionId: string; code: string; name: string | null;
+    originName: string | null; destinationName: string | null;
+    legDestinationName: string | null;
+    dayShift: number;
+  }[];
 };
 
 type Req = {
@@ -73,6 +85,25 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
   const [pending, setPending] = useState<Record<string, number | null>>({});
   const [saving, setSaving] = useState<Set<string>>(new Set());
 
+  // Направлений больше двух десятков, и все развёрнутые не читаются. По умолчанию
+  // свёрнуто: видны только названия, объём вводится в развёрнутой группе.
+  // Развёрнутые запоминаем в localStorage — как collapsed у бокового меню.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('planning:expanded');
+      if (raw) setExpanded(new Set(JSON.parse(raw) as string[]));
+    } catch { /* повреждённое значение просто игнорируем */ }
+  }, []);
+  function toggleGroup(key: string) {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      try { localStorage.setItem('planning:expanded', JSON.stringify(Array.from(next))); } catch { /* приватный режим */ }
+      return next;
+    });
+  }
+
   const weekDates = DAYS.map((_, i) => weekStart.add(i, 'day'));
   const todayStr = dayjs().format('YYYY-MM-DD');
 
@@ -95,29 +126,82 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
   // суммарный объём на день (строка «Итого» внизу группы).
   // Графики без разрешённого направления не теряем — сводим в отдельные группы
   // по паре локаций, чтобы их было видно и можно было починить.
-  type Group = { key: string; title: string; subtitle: string | null; schedules: Schedule[] };
+  // Строка сетки. Обычная строка редактируется, строка транзитного города —
+  // только для чтения: это тот же груз, введённый в городе отправления.
+  type Row = {
+    key: string;
+    destName: string;
+    customerId: string;
+    customerName: string;
+    contractNumber: string;
+    oId: string;
+    dId: string;
+    days: (number | null)[];
+    dayShift: number;
+    schedule: Schedule | null; // null → только для чтения
+  };
+  type Group = { key: string; title: string; subtitle: string | null; rows: Row[] };
   const groupMap = new Map<string, Group>();
+
+  function ensureGroup(key: string, title: string, subtitle: string | null) {
+    if (!groupMap.has(key)) groupMap.set(key, { key, title, subtitle, rows: [] });
+    return groupMap.get(key)!;
+  }
+
   for (const s of data.schedules) {
     const md = s.magistralDirection;
     const key = md ? `dir:${md.id}` : `pair:${originId(s)}_${destId(s)}`;
-    if (!groupMap.has(key)) {
-      groupMap.set(key, {
-        key,
-        title: md ? `${md.code}${md.name ? ` · ${md.name}` : ''}` : `${originName(s)} → ${destName(s)}`,
-        subtitle: md
-          ? (md.originName && md.destinationName ? `${md.originName} → ${md.destinationName}` : null)
-          : 'направление не определено — у графика нет шаблона с магистральным плечом',
-        schedules: [],
+    const g = ensureGroup(
+      key,
+      md ? `${md.code}${md.name ? ` · ${md.name}` : ''}` : `${originName(s)} → ${destName(s)}`,
+      md
+        ? (md.originName && md.destinationName ? `${md.originName} → ${md.destinationName}` : null)
+        : 'направление не определено — у графика нет шаблона с магистральным плечом',
+    );
+    g.rows.push({
+      key: s.id,
+      destName: destName(s),
+      customerId: s.customerContract.customer.id,
+      customerName: s.customerContract.customer.name,
+      contractNumber: s.customerContract.contractNumber,
+      oId: originId(s),
+      dId: destId(s),
+      days: DAYS.map((d) => s[d]),
+      dayShift: 0,
+      schedule: s,
+    });
+
+    // Эхо в группе транзитного города: дни сдвинуты на смещение забора этого плеча.
+    // Сдвиг по модулю недели — поэтому в понедельник видна заявка воскресенья
+    // прошлой недели, и заявки за неделю до начала периода сервер тоже отдаёт.
+    for (const on of s.onward ?? []) {
+      const og = ensureGroup(
+        `dir:${on.directionId}`,
+        `${on.code}${on.name ? ` · ${on.name}` : ''}`,
+        on.originName && on.destinationName ? `${on.originName} → ${on.destinationName}` : null,
+      );
+      og.rows.push({
+        key: `${s.id}__${on.directionId}`,
+        destName: on.legDestinationName ?? on.destinationName ?? '?',
+        customerId: s.customerContract.customer.id,
+        customerName: s.customerContract.customer.name,
+        contractNumber: s.customerContract.contractNumber,
+        oId: originId(s),
+        dId: destId(s),
+        days: DAYS.map((_, i) => s[DAYS[(i - on.dayShift + 7) % 7]]),
+        dayShift: on.dayShift,
+        schedule: null,
       });
     }
-    groupMap.get(key)!.schedules.push(s);
   }
   const groups = Array.from(groupMap.values());
-  // Внутри группы — как в рабочем файле: по конечной точке, затем по клиенту
+  // Внутри группы — как в рабочем файле: по конечной точке, затем по клиенту.
+  // Редактируемые строки выше строк транзитного города: сначала то, что планируют.
   for (const g of groups) {
-    g.schedules.sort((a, b) =>
-      destName(a).localeCompare(destName(b), 'ru') ||
-      a.customerContract.customer.name.localeCompare(b.customerContract.customer.name, 'ru')
+    g.rows.sort((a, b) =>
+      Number(!a.schedule) - Number(!b.schedule) ||
+      a.destName.localeCompare(b.destName, 'ru') ||
+      a.customerName.localeCompare(b.customerName, 'ru')
     );
   }
 
@@ -129,6 +213,31 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
       r.deliveryLocationId === dId &&
       r.pickupDate?.startsWith(dayStr),
     );
+  }
+
+  // Готовность направления к ЗАВТРАШНЕЙ отгрузке: сколько строк, по которым завтра
+  // возим, уже имеют заявку. Свёрнутая группа этим и живёт — по индикатору видно,
+  // куда лезть, не разворачивая все 28.
+  //
+  // Считаем только редактируемые строки: транзитные показывают ТЕ ЖЕ заявки,
+  // и их учёт удвоил бы и знаменатель, и числитель.
+  // Если завтра не попадает в показываемую неделю (например в воскресенье) —
+  // индикатора нет: данных за пределами недели у нас не запрошено.
+  const tomorrow = dayjs().add(1, 'day');
+  const tomorrowIdx = weekDates.findIndex(d => d.isSame(tomorrow, 'day'));
+
+  function readiness(rows: Row[]): { filled: number; scheduled: number } | null {
+    if (tomorrowIdx < 0) return null;
+    const dayDate = weekDates[tomorrowIdx];
+    let scheduled = 0;
+    let filled = 0;
+    for (const row of rows) {
+      if (!row.schedule) continue;              // транзитная строка — не планируется здесь
+      if (row.days[tomorrowIdx] == null) continue; // в этот день не возим
+      scheduled++;
+      if (findRequest(row.customerId, row.oId, row.dId, dayDate)) filled++;
+    }
+    return scheduled ? { filled, scheduled } : null;
   }
 
   async function handleSave(s: Schedule, dayIdx: number) {
@@ -203,18 +312,72 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
         </div>
       )}
 
-      {groups.map(group => (
+      {groups.map(group => {
+        const isExpanded = expanded.has(group.key);
+        return (
         <div
           key={group.key}
-          style={{ marginBottom: 20, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 8, overflow: 'hidden' }}
+          style={{ marginBottom: isExpanded ? 20 : 8, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 8, overflow: 'hidden' }}
         >
-          <div style={{ padding: '10px 16px', borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
+          {/* Шапка — переключатель. Свёрнуто по умолчанию: направлений больше двух
+              десятков, развёрнутыми они не читаются. Клик по всей полосе, не только
+              по стрелке: попасть в узкую иконку мышью неудобно. */}
+          <div
+            onClick={() => toggleGroup(group.key)}
+            style={{
+              padding: '10px 16px',
+              borderBottom: isExpanded ? '1px solid #f0f0f0' : undefined,
+              background: '#fafafa',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              userSelect: 'none',
+            }}
+          >
+            {isExpanded
+              ? <DownOutlined style={{ fontSize: 10, color: '#888' }} />
+              : <RightOutlined style={{ fontSize: 10, color: '#888' }} />}
+            {(() => {
+              const r = readiness(group.rows);
+              if (!r) return null;
+              const dayLabel = `${DAY_SHORT[tomorrowIdx].toLowerCase()} ${weekDates[tomorrowIdx].format('D MMM')}`;
+              if (r.filled === 0) {
+                return (
+                  <Tooltip title={`Отгрузка ${dayLabel}: не заполнено ни одной строки из ${r.scheduled}`}>
+                    <CloseCircleFilled style={{ color: '#ff4d4f', fontSize: 14 }} />
+                  </Tooltip>
+                );
+              }
+              if (r.filled < r.scheduled) {
+                return (
+                  <Tooltip title={`Отгрузка ${dayLabel}: заполнено ${r.filled} из ${r.scheduled}`}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                      <ExclamationCircleFilled style={{ color: '#faad14', fontSize: 14 }} />
+                      <Text style={{ fontSize: 11, color: '#ad6800', fontVariantNumeric: 'tabular-nums' }}>
+                        {r.filled}/{r.scheduled}
+                      </Text>
+                    </span>
+                  </Tooltip>
+                );
+              }
+              return (
+                <Tooltip title={`Отгрузка ${dayLabel}: заполнены все ${r.scheduled}`}>
+                  <CheckCircleFilled style={{ color: '#52c41a', fontSize: 14 }} />
+                </Tooltip>
+              );
+            })()}
             <Text strong style={{ fontSize: 13 }}>{group.title}</Text>
             {group.subtitle && (
-              <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>{group.subtitle}</Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>{group.subtitle}</Text>
+            )}
+            {!isExpanded && (
+              <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                {group.rows.length} {group.rows.length === 1 ? 'строка' : group.rows.length < 5 ? 'строки' : 'строк'}
+              </Text>
             )}
           </div>
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ overflowX: 'auto', display: isExpanded ? undefined : 'none' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr>
@@ -234,31 +397,41 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
                 </tr>
               </thead>
               <tbody>
-                {group.schedules.map(s => {
-                  const cid = s.customerContract.customer.id;
+                {group.rows.map(row => {
+                  const cid = row.customerId;
+                  const readOnly = !row.schedule;
                   return (
-                    <tr key={s.id}>
-                      <td style={{ ...tdBase, textAlign: 'left', ...destColStyle }}>
-                        <div style={{ fontWeight: 500, lineHeight: 1.3 }}>{destName(s)}</div>
+                    <tr key={row.key}>
+                      <td style={{ ...tdBase, textAlign: 'left', ...destColStyle, background: readOnly ? '#fafafa' : undefined }}>
+                        <div style={{ fontWeight: 500, lineHeight: 1.3 }}>{row.destName}</div>
                       </td>
-                      <td style={{ ...tdBase, textAlign: 'left', ...clientColStyle }}>
-                        <div style={{ lineHeight: 1.3 }}>{s.customerContract.customer.name}</div>
-                        <div style={{ color: '#aaa', fontSize: 11 }}>{s.customerContract.contractNumber}</div>
+                      <td style={{ ...tdBase, textAlign: 'left', ...clientColStyle, background: readOnly ? '#fafafa' : undefined }}>
+                        <div style={{ lineHeight: 1.3 }}>{row.customerName}</div>
+                        <div style={{ color: '#aaa', fontSize: 11 }}>
+                          {row.contractNumber}
+                          {readOnly && (
+                            <Tooltip title={`Тот же груз, что запланирован в городе отправления, — здесь он на ${row.dayShift} дн. позже. Ввод только там, иначе паллеты посчитаются дважды.`}>
+                              <span style={{ marginLeft: 6, color: '#bfbfbf' }}>· транзит</span>
+                            </Tooltip>
+                          )}
+                        </div>
                       </td>
                       {DAYS.map((day: DayKey, i) => {
                         // null = в этот день не возим; 0 = доставка в день забора.
                         // Проверять на «ложность» нельзя — ноль это валидный срок.
-                        const transit = s[day];
+                        const transit = row.days[i];
                         const scheduled = transit != null;
                         const dayDate = weekDates[i];
                         const dStr = dayDate.format('YYYY-MM-DD');
                         const isToday = dStr === todayStr;
                         // Локации берём ИЗ СТРОКИ, не из группы: в одной группе
                         // (одно направление) разные конечные точки.
-                        const sOid = originId(s);
-                        const sDid = destId(s);
+                        const sOid = row.oId;
+                        const sDid = row.dId;
                         const ck = `${cid}__${sOid}__${sDid}__${dStr}`;
-                        const existingReq = findRequest(cid, sOid, sDid, dayDate);
+                        // У строки транзитного города заявка забиралась раньше на dayShift дней
+                        const reqDate = row.dayShift ? dayDate.subtract(row.dayShift, 'day') : dayDate;
+                        const existingReq = findRequest(cid, sOid, sDid, reqDate);
                         const isSaving = saving.has(ck);
                         const val = pending[ck] ?? null;
 
@@ -293,8 +466,21 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
 
                         if (!scheduled) {
                           return (
-                            <td key={day} style={{ ...dayCellBase, background: isToday ? '#fafeff' : undefined }}>
+                            <td key={day} style={{ ...dayCellBase, background: isToday ? '#fafeff' : readOnly ? '#fafafa' : undefined }}>
                               <span style={{ color: '#e0e0e0' }}>—</span>
+                            </td>
+                          );
+                        }
+
+                        // Строка транзитного города: поля ввода нет. День по графику есть,
+                        // но заявку ещё не создали в городе отправления — показываем это,
+                        // чтобы было видно ожидаемую отгрузку.
+                        if (readOnly) {
+                          return (
+                            <td key={day} style={{ ...dayCellBase, background: isToday ? '#fafeff' : '#fafafa' }}>
+                              <Tooltip title="По графику отгрузка есть, но заявка в городе отправления пока не создана">
+                                <span style={{ color: '#bfbfbf', fontSize: 11 }}>ждём</span>
+                              </Tooltip>
                             </td>
                           );
                         }
@@ -309,13 +495,13 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
                                   placeholder="пал"
                                   value={val ?? undefined}
                                   onChange={v => setPending(prev => ({ ...prev, [ck]: v ?? null }))}
-                                  onPressEnter={() => handleSave(s, i)}
+                                  onPressEnter={() => handleSave(row.schedule!, i)}
                                   style={{ width: 58 }}
                                 />
                                 {val && val > 0 && (
                                   <Button
                                     type="primary" size="small" icon={<CheckOutlined />}
-                                    onClick={() => handleSave(s, i)}
+                                    onClick={() => handleSave(row.schedule!, i)}
                                     style={{ padding: '0 5px' }}
                                   />
                                 )}
@@ -340,16 +526,17 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
                     const dStr = dayDate.format('YYYY-MM-DD');
                     const isToday = dStr === todayStr;
                     let total = 0;
-                    for (const s of group.schedules) {
-                      const cid2 = s.customerContract.customer.id;
-                      const sOid = originId(s);
-                      const sDid = destId(s);
+                    for (const row of group.rows) {
+                      const cid2 = row.customerId;
+                      const sOid = row.oId;
+                      const sDid = row.dId;
                       // Заявки считаем всегда, даже вне графика — машину под них
                       // всё равно надо заказывать. Незаписанный ввод возможен
-                      // только там, где есть поле, то есть где день в графике.
-                      const req = findRequest(cid2, sOid, sDid, dayDate);
+                      // только там, где есть поле, то есть в редактируемой строке.
+                      const reqDate = row.dayShift ? dayDate.subtract(row.dayShift, 'day') : dayDate;
+                      const req = findRequest(cid2, sOid, sDid, reqDate);
                       if (req) total += req.requestedPallets ?? 0;
-                      else if (s[day] != null) total += pending[`${cid2}__${sOid}__${sDid}__${dStr}`] ?? 0;
+                      else if (row.schedule && row.days[i] != null) total += pending[`${cid2}__${sOid}__${sDid}__${dStr}`] ?? 0;
                     }
                     return (
                       <td
@@ -372,7 +559,8 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
             </table>
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

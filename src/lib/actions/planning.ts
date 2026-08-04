@@ -63,8 +63,18 @@ export async function getPlanningData(weekStartISO: string) {
   // Направление графика = ПЕРВОЕ магистральное плечо привязанного шаблона.
   // Планируется машина, выходящая из хаба: если груз идёт МСК→Казань→Ижевск,
   // он должен попасть в группу МСК-Казань, а не Казань-Ижевск.
-  // Заборные плечи отсекаем по признаку «у направления не заданы origin/destination»
-  // (так устроено псевдо-направление MSK-MSK «Москва-Москва»).
+  //
+  // Заборное плечо отсекаем по двум признакам:
+  //  (а) у направления не заданы origin/destination — псевдо-направления MSK-MSK
+  //      «Москва-Москва» и SPB-SPB;
+  //  (б) плечо приходит на ХАБ КОНСОЛИДАЦИИ и после него в шаблоне есть ещё плечи,
+  //      то есть груз на хабе перегружают, а не сдают. Так устроены CHEF-MSK
+  //      (ШефМаркет → РЦ МСК), STUDIA-MSK, ELEM-MSK: у них origin/destination
+  //      заполнены, и признака (а) недостаточно — «ШефМаркет - КД НН» попадал
+  //      в группу CHEF-MSK вместо MSK-NN.
+  //      Условие «есть плечи после» обязательно: для «ШефМаркет - РЦ МСК» или
+  //      «ВкусМилл - РЦ СПБ» хаб и есть конечная точка, там это магистраль.
+  //
   // ВНИМАНИЕ: у Direction поля originId/destinationId, у DirectionSchedule —
   // originLocationId/destinationLocationId.
   const allDirections = await prisma.direction.findMany({
@@ -72,11 +82,50 @@ export async function getPlanningData(weekStartISO: string) {
   });
   const dirById = new Map(allDirections.map((d) => [d.id, d]));
 
+  const hubLocations = await prisma.location.findMany({
+    where: { code: { in: ['LOC-MSK-SOUTH', 'LOC-MSK-NORTH', 'LOC-SPB'] } },
+    select: { id: true },
+  });
+  const hubIds = new Set(hubLocations.map((h) => h.id));
+
+  const locNames = await prisma.location.findMany({ select: { id: true, name: true } });
+  const locNameById = new Map(locNames.map((l) => [l.id, l.name]));
+
   const schedulesWithDirection = schedules.map((s) => {
     const legs: any[] = (((s.requestTemplate?.data as any)?.cargoes) || []).flatMap((c: any) => c.legs || []);
-    const magistral = legs
-      .map((l) => (l.directionId ? dirById.get(l.directionId) : undefined))
-      .find((d) => d && d.originId && d.destinationId);
+
+    let magistral: any;
+    let magistralIdx = -1;
+    for (let i = 0; i < legs.length; i++) {
+      const d = legs[i].directionId ? dirById.get(legs[i].directionId) : undefined;
+      if (!d || !d.originId || !d.destinationId) continue;                      // (а)
+      if (i !== legs.length - 1 && hubIds.has(legs[i].dropoffLocationId)) continue; // (б)
+      magistral = d;
+      magistralIdx = i;
+      break;
+    }
+
+    // Плечи ПОСЛЕ магистрального — это перевозки из транзитного города
+    // (Казань → Ижевск / Уфа / Самара). Физически это тот же груз и та же
+    // заявка, но другая машина и другой перевозчик, поэтому в сетке они
+    // показываются отдельной группой — только для чтения, ввод остаётся
+    // в ячейке города отправления. Иначе одни паллеты введут дважды.
+    // День отправления из транзитного города = день ячейки + pickupDayOffset плеча.
+    const onward = legs.slice(magistralIdx + 1).flatMap((leg: any) => {
+      const d = leg.directionId ? dirById.get(leg.directionId) : undefined;
+      if (!d || !d.originId || !d.destinationId) return [];
+      if (leg.pickupDayOffset == null) return []; // без смещения день не определить
+      return [{
+        directionId: d.id,
+        code: d.code,
+        name: d.name,
+        originName: d.origin?.name ?? null,
+        destinationName: d.destination?.name ?? null,
+        legDestinationName: leg.dropoffLocationId ? locNameById.get(leg.dropoffLocationId) ?? null : null,
+        dayShift: leg.pickupDayOffset as number,
+      }];
+    });
+
     return {
       ...s,
       magistralDirection: magistral
@@ -88,11 +137,17 @@ export async function getPlanningData(weekStartISO: string) {
             destinationName: magistral.destination?.name ?? null,
           }
         : null,
+      onward,
     };
   });
 
+  // Окно шире отображаемой недели: строка транзитного города показывает заявку,
+  // забранную на dayShift дней раньше, и в понедельник это воскресенье прошлой недели.
+  const reqFrom = new Date(weekStart);
+  reqFrom.setDate(reqFrom.getDate() - 7);
+
   const requests = await prisma.customerRequest.findMany({
-    where: { pickupDate: { gte: weekStart, lt: weekEnd } },
+    where: { pickupDate: { gte: reqFrom, lt: weekEnd } },
     select: {
       id: true,
       requestNumber: true,

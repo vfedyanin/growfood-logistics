@@ -32,8 +32,17 @@ export default function CargoPage() {
   const [tripOptions, setTripOptions] = useState<any[]>([]);
   const [filterTrip, setFilterTrip] = useState<string | undefined>(); // 'NONE' | tripId | undefined
   const [fCustomer, setFCustomer] = useState<string | undefined>();
-  const [fPickup, setFPickup] = useState<any>(null);
+  // По умолчанию — забор за ЗАВТРА (с завтра по завтра): на странице грузов
+  // работают с ближайшей отгрузкой, а весь список за все даты бесполезен.
+  // Остальные фильтры пустые.
+  const [fPickup, setFPickup] = useState<any>(() => {
+    const t = dayjs().add(1, 'day');
+    return [t, t];
+  });
   const [fDropoff, setFDropoff] = useState<any>(null);
+  // Статус по умолчанию «Без рейса»: логист открывает страницу, чтобы сразу
+  // увидеть, что осталось нераспределённым на завтра, и работать с этим.
+  const [fStatus, setFStatus] = useState<string | undefined>('NONE');
 
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -46,8 +55,13 @@ export default function CargoPage() {
     setLoading(true);
     try {
       const filters: any = {};
-      if (filterTrip === 'NONE') filters.unassigned = true;
-      else if (filterTrip) filters.tripId = filterTrip;
+      // «Без рейса» — отсутствие привязки, а не статус рейса: если выбрано оно,
+      // конкретный рейс и статус смысла не имеют.
+      if (fStatus === 'NONE' || filterTrip === 'NONE') filters.unassigned = true;
+      else {
+        if (filterTrip) filters.tripId = filterTrip;
+        if (fStatus) filters.tripStatus = fStatus;
+      }
       if (fCustomer) filters.customerId = fCustomer;
       if (fPickup?.[0]) filters.pickupFrom = fPickup[0].startOf('day').toISOString();
       if (fPickup?.[1]) filters.pickupTo = fPickup[1].endOf('day').toISOString();
@@ -56,7 +70,7 @@ export default function CargoPage() {
       setData(await getAllCargoLegs(filters));
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filterTrip, fCustomer, fPickup, fDropoff]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filterTrip, fCustomer, fPickup, fDropoff, fStatus]);
   useEffect(() => { getAllTripOptions().then(setTripOptions); }, []);
 
   const openAssign = (l: any) => { setAssigningLeg(l); assignForm.resetFields(); setAssignOpen(true); };
@@ -105,7 +119,20 @@ export default function CargoPage() {
 
   return (
     <>
-      <FilterBar onReset={() => { setFilterTrip(undefined); setFCustomer(undefined); setFPickup(null); setFDropoff(null); }}>
+      <FilterBar onReset={() => { setFilterTrip(undefined); setFCustomer(undefined); setFPickup(null); setFDropoff(null); setFStatus(undefined); }}>
+        {/* «Без рейса» живёт здесь, а не в фильтре рейсов: два контрола с одним
+            смыслом путали бы и могли противоречить друг другу. */}
+        <Select
+          placeholder="Статус"
+          allowClear
+          style={{ width: 170 }}
+          value={fStatus}
+          onChange={setFStatus}
+          options={[
+            { value: 'NONE', label: 'Без рейса' },
+            ...Object.entries(tripStatusCfg).map(([value, cfg]) => ({ value, label: cfg.label })),
+          ]}
+        />
         <Select
           placeholder="Фильтр по рейсу"
           allowClear
@@ -114,7 +141,7 @@ export default function CargoPage() {
           onChange={setFilterTrip}
           showSearch
           optionFilterProp="label"
-          options={[{ value: 'NONE', label: '— Без рейса —' }, ...tripOptions]}
+          options={tripOptions}
         />
         <CustomerSelect placeholder="Заявитель" style={{ width: 200 }} value={fCustomer} onChange={setFCustomer} />
         <DatePicker.RangePicker value={fPickup} onChange={setFPickup} onCalendarChange={setFPickup} format="DD.MM.YYYY" placeholder={['Забор с', 'Забор по']} />
