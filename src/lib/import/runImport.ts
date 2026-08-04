@@ -23,12 +23,13 @@ async function importFromText(
 }
 
 // Итоговый статус прогона для лога.
-export function importStatus(r: ImportResult): 'SUCCESS' | 'PARTIAL' | 'EMPTY' | 'ERROR' {
+export function importStatus(r: ImportResult): 'SUCCESS' | 'PARTIAL' | 'EMPTY' | 'DUPLICATES' | 'ERROR' {
   const created = r.created.length;
   const hasErrors = r.errors.length > 0;
   if (created > 0 && hasErrors) return 'PARTIAL';
   if (created > 0) return 'SUCCESS';
   if (hasErrors) return 'ERROR';
+  if (r.skipped.length > 0) return 'DUPLICATES'; // заявки были, но все — дубли/пропуски
   return 'EMPTY';
 }
 

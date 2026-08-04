@@ -37,6 +37,11 @@ export async function createRequestsFromParsed(
 ): Promise<ImportResult> {
   const result: ImportResult = { created: [], skipped: [], errors: [], warnings: [...parsed.warnings] };
   const actor = opts.systemActorId ?? null;
+  // Дата документа определяется ОДИН раз и используется и в дедупе, и при создании
+  // (раньше расходились: дедуп получал undefined → искал по всей истории и давал ложные
+  // пропуски; создание падало на new Date()). Если дата не распознана — дедуп по дате
+  // невозможен, заявку НЕ пропускаем молча (см. ниже).
+  const docDate = parsed.documentDate ? new Date(parsed.documentDate) : null;
 
   const customer = parsed.clientInn
     ? await prisma.customer.findFirst({ where: { inn: parsed.clientInn }, select: { id: true, name: true, verticalCode: true } })
@@ -77,7 +82,7 @@ export async function createRequestsFromParsed(
     return found;
   };
   // Клиентские тарифы плательщика по точке — для авто-цены (finalCost груза)
-  const tariffMap = await getClientTariffMap(customer.id, parsed.documentDate ? new Date(parsed.documentDate) : new Date());
+  const tariffMap = await getClientTariffMap(customer.id, docDate ?? new Date());
 
   for (const r of parsed.requests) {
     let dest = resolve(r.destinationName);
@@ -107,12 +112,20 @@ export async function createRequestsFromParsed(
     if (!pickup) { result.skipped.push({ destination: r.destinationName, reason: `точка забора «${r.pickupName}» не найдена` }); result.errors.push(`Точка забора «${r.pickupName}» не найдена — заявка на ${dest.name} не создана.`); continue; }
     if (!(r.pallets > 0)) { result.skipped.push({ destination: dest.name, reason: 'кол-во паллет не распознано (0)' }); continue; }
 
-    // Дедуп: та же точка+плательщик+дата документа уже импортирована
-    const dup = await prisma.customerRequest.findFirst({
-      where: { source: 'EMAIL_IMPORT', payerId: customer.id, requestDate: parsed.documentDate ? new Date(parsed.documentDate) : undefined, cargoes: { some: { consigneeLocationId: dest.id } } },
-      select: { requestNumber: true },
-    });
-    if (dup) { result.skipped.push({ destination: dest.name, reason: `уже импортирована ранее (${dup.requestNumber})` }); continue; }
+    // Дедуп: та же точка+плательщик+дата документа уже импортирована.
+    // Только при известной дате документа: без неё поиск по всей истории даёт ложные
+    // пропуски (отбрасывает законную заявку по любой старой на ту же точку).
+    if (docDate) {
+      const dup = await prisma.customerRequest.findFirst({
+        where: { source: 'EMAIL_IMPORT', payerId: customer.id, requestDate: docDate, cargoes: { some: { consigneeLocationId: dest.id } } },
+        select: { requestNumber: true },
+      });
+      if (dup) { result.skipped.push({ destination: dest.name, reason: `уже импортирована ранее (${dup.requestNumber})` }); continue; }
+    } else {
+      // Дата не распознана — проверка на дубль невозможна. Создаём и явно предупреждаем:
+      // ложный пропуск хуже дубля (дубль видно, пропуск — нет).
+      result.warnings.push(`${dest.name}: дата документа не распознана — проверка на дубль не выполнена, нужна ручная сверка.`);
+    }
 
     // Авто-цена по тарифу договора (PER_PALLET × паллеты / PER_TRIP / тир по вместимости ТС)
     const tariff = tariffMap.get(dest.id);
@@ -130,7 +143,7 @@ export async function createRequestsFromParsed(
         verticalCode: customer.verticalCode,
         source: 'EMAIL_IMPORT',
         status: 'NEW',
-        requestDate: parsed.documentDate ? new Date(parsed.documentDate) : new Date(),
+        requestDate: docDate ?? new Date(),
         pickupLocationId: pickup.id,
         deliveryLocationId: dest.id,
         pickupDate: combineDT(r.pickupDate, r.pickupTimeFrom),

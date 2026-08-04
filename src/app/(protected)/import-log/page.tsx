@@ -13,6 +13,7 @@ const statusCfg: Record<string, { color: string; label: string }> = {
   SUCCESS: { color: 'green', label: 'Успех' },
   PARTIAL: { color: 'orange', label: 'Частично' },
   EMPTY: { color: 'default', label: 'Пусто' },
+  DUPLICATES: { color: 'gold', label: 'Дубли' },
   ERROR: { color: 'red', label: 'Ошибка' },
 };
 const triggerCfg: Record<string, string> = { MANUAL: 'Вручную', CRON: 'Крон' };

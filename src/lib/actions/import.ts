@@ -58,7 +58,7 @@ export async function runManualImport(formData: FormData) {
   const docx = isDocx(file.name || '', file.type);
 
   let result: RunImportResult | null = null;
-  let logStatus: 'SUCCESS' | 'PARTIAL' | 'EMPTY' | 'ERROR' = 'ERROR';
+  let logStatus: 'SUCCESS' | 'PARTIAL' | 'EMPTY' | 'DUPLICATES' | 'ERROR' = 'ERROR';
   let stage: string | null = 'create';
   let message = '';
   let fatalError: string | null = null;
