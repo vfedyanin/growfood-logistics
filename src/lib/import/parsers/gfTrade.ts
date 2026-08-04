@@ -44,6 +44,21 @@ function weightToKg(v: number | null): number | null {
   return v < 10 ? Math.round(v * 1000) : Math.round(v);
 }
 
+// Служебные слова из шапки таблицы — НЕ могут быть пунктом назначения. Vision иногда
+// разбивает «Номер Заказа» на отдельные строки «Номер»/«Заказа», поэтому проверяем и
+// одиночные слова, а не только фразу «номер заказа».
+const SERVICE_WORDS = /^(?:номер|заказа?|наименование|груза?|темп|вес|объ[её]м|количество|мест[оа]?|стоимость|итого|дата|время|условия|прочие)$/i;
+
+// Пункт назначения правдоподобен, если длиннее 2 символов и не является одним
+// служебным словом (список выше).
+function isPlausibleDest(name: string): boolean {
+  const t = name.trim();
+  if (t.length < 3) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length === 1 && SERVICE_WORDS.test(words[0])) return false;
+  return true;
+}
+
 export function parseGfTrade(ocrText: string): ParsedImport {
   const warnings: string[] = [];
   const text = ocrText.replace(/\r/g, '');
@@ -56,8 +71,9 @@ export function parseGfTrade(ocrText: string): ParsedImport {
 
   // Дата документа: «29» 07 2026 г  или  «03» августа 2026 г (месяц словом).
   const MON: Record<string, string> = { янв: '01', фев: '02', мар: '03', апр: '04', мая: '05', июн: '06', июл: '07', авг: '08', сен: '09', окт: '10', ноя: '11', дек: '12' };
-  const dm = region.match(/[«"'”]\s*(\d{1,2})\s*[»"'”]\s*([а-яё]{3,}|\d{2})/i);
-  const ym = region.match(/(20\d{2})\s*г/);
+  // «29» 07 …  Vision иногда искажает: «« → <<», «г» → латинская «r».
+  const dm = region.match(/(?:[«"'”]|<<)\s*(\d{1,2})\s*(?:[»"'”]|>>)?\s*([а-яё]{3,}|\d{2})/i);
+  const ym = region.match(/(20\d{2})\s*[гr]/i);
   const mm = dm ? (/^\d{2}$/.test(dm[2]) ? dm[2] : (MON[dm[2].toLowerCase().slice(0, 3)] ?? null)) : null;
   const documentDate = dm && ym && mm ? toIso(`${dm[1].padStart(2, '0')}.${mm}.${ym[1]}`) : null;
   if (!documentDate) warnings.push('Не удалось распознать дату документа.');
@@ -101,7 +117,7 @@ export function parseGfTrade(ocrText: string): ParsedImport {
   let cur: Stop | null = null;
   for (const l of cargoBlock) {
     const sm = l.match(stopRe);
-    if (sm && !skipRe.test(l)) { const city = titleCity(sm[1].replace(/[.\-]/g, ' ').trim()); cur = { city, destinationName: city, weightKg: null, pallets: 0 }; stops.push(cur); continue; }
+    if (sm && !skipRe.test(l) && isPlausibleDest(sm[1])) { const city = titleCity(sm[1].replace(/[.\-]/g, ' ').trim()); cur = { city, destinationName: city, weightKg: null, pallets: 0 }; stops.push(cur); continue; }
     const pm = l.match(palletRe);
     if (pm) { const p = Number(pm[1]); allPallets.push(p); if (cur && !cur.pallets) cur.pallets = p; continue; }
     // Вес: строка-число; пробелы внутри убираем («149. 185» → 149.185).
@@ -125,10 +141,20 @@ export function parseGfTrade(ocrText: string): ParsedImport {
     dests.forEach((d, i) => {
       // Обрезаем хвост-адрес, если он попал в ту же строку.
       const clean = d.split(/\s+(?=\d{5,6}\b|область|обл\.?\b|район|р-н|ул\.|д\.\s*\d)/i)[0].trim();
+      if (!isPlausibleDest(clean)) return; // не выдумываем точку из служебного текста/мусора
       const cm = clean.match(/самокат\s+([А-ЯЁ][а-яё]+)/i);
       const city = cm ? titleCity(cm[1]) : clean.split(/[\s(]/)[0];
       stops.push({ city, destinationName: clean, weightKg: allWeights[i] ?? allWeights[0] ?? null, pallets: allPallets[i] ?? allPallets[0] ?? 0 });
     });
+    // Задача 2: если ничего не нашли или получатель распознан неуверенно (одно слово) —
+    // прикладываем фрагмент блока выгрузки, чтобы оператор разобрал через интерфейс.
+    const singleWord = stops.some((s) => s.destinationName.split(/\s+/).filter(Boolean).length === 1);
+    if (!stops.length || singleWord) {
+      const frag = delLines.join(' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+      warnings.push(stops.length
+        ? `Пункт назначения распознан неуверенно — сверьте по блоку выгрузки: «${frag}»`
+        : `Не удалось определить пункт назначения. Блок выгрузки: «${frag}»`);
+    }
   }
 
   if (!stops.length) warnings.push('Не найдено ни одной строки груза (метка стопа) — проверьте раскладку OCR.');
