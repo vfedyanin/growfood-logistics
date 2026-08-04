@@ -110,7 +110,7 @@ export function parseGfTrade(ocrText: string): ParsedImport {
   const skipRe = /продукт|наименован|номер\s*заказ|темп|вес|объ[её]м|количеств|стоимост|груз|европал|паллет|услови|адрес|контакт|склад|дата|время/i;
   const palletRe = /(\d+)\s*(?:европал|паллет|мест)/i;
 
-  type Stop = { city: string; destinationName: string; weightKg: number | null; pallets: number };
+  type Stop = { city: string; destinationName: string; weightKg: number | null; pallets: number; sourceText?: string };
   const stops: Stop[] = [];
   const allWeights: (number | null)[] = [];
   const allPallets: number[] = [];
@@ -135,6 +135,9 @@ export function parseGfTrade(ocrText: string): ParsedImport {
     const delStart = lines.findIndex((l) => /грузополучател|дата\s+выгрузк/i.test(l));
     const delLines = delStart >= 0 ? lines.slice(delStart, startIdx >= 0 ? startIdx : lines.length) : lines;
     const consRe = /самокат|пят[её]роч|перекр[её]ст|магнит|умный\s+ритейл|ритейл|\bрц\b|\bтд\b/i;
+    // Весь блок выгрузки — прикладываем к стопу, чтобы createRequests при неудаче резолва
+    // по имени искал в нём знакомый город из реестра Location.
+    const blockText = delLines.join(' ').replace(/\s+/g, ' ').trim();
     const dests = Array.from(new Set(delLines
       .filter((l) => consRe.test(l) && !/адрес|контакт|дата|время|грузополучател/i.test(l))
       .map((l) => l.replace(/\s+/g, ' ').trim())));
@@ -144,7 +147,7 @@ export function parseGfTrade(ocrText: string): ParsedImport {
       if (!isPlausibleDest(clean)) return; // не выдумываем точку из служебного текста/мусора
       const cm = clean.match(/самокат\s+([А-ЯЁ][а-яё]+)/i);
       const city = cm ? titleCity(cm[1]) : clean.split(/[\s(]/)[0];
-      stops.push({ city, destinationName: clean, weightKg: allWeights[i] ?? allWeights[0] ?? null, pallets: allPallets[i] ?? allPallets[0] ?? 0 });
+      stops.push({ city, destinationName: clean, weightKg: allWeights[i] ?? allWeights[0] ?? null, pallets: allPallets[i] ?? allPallets[0] ?? 0, sourceText: blockText });
     });
     // Задача 2: если ничего не нашли или получатель распознан неуверенно (одно слово) —
     // прикладываем фрагмент блока выгрузки, чтобы оператор разобрал через интерфейс.
@@ -178,6 +181,7 @@ export function parseGfTrade(ocrText: string): ParsedImport {
     return {
       city: s.city,
       destinationName: s.destinationName, // метка стопа/получатель; сопоставление — через реестр/алиасы
+      destinationText: s.sourceText ?? null, // текст блока выгрузки — для резолва по городу
       deliveryDate: dd ? toIso(dd) : null,
       deliveryTimeFrom: delT.from,
       deliveryTimeTo: delT.to,
