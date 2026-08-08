@@ -26,6 +26,6 @@ export async function importPdf(
   }
   const text = await ocrPdf(pdfBuffer);
   const parsed = parser(text);
-  const result = await createRequestsFromParsed(parsed, opts);
+  const result = await createRequestsFromParsed(parsed, { ...opts, parserKey });
   return { ...result, parserKey, ocrChars: text.length };
 }

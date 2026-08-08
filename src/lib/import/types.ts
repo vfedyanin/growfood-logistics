@@ -4,6 +4,7 @@
 export type ParsedCargoLine = {
   rawName: string;            // как в документе: «Королевский Вкус, Самокат КАЗАНЬ»
   city: string;              // нормализованный город: «Казань»
+  brand?: string | null;     // бренд/юрлицо грузоотправителя из rawName (для brandMap, Задача 4)
   orderNumbers: string[];    // № заказа (УПД), напр. ['5988','5989']
   tempRegime?: string | null; // 'COOLED' | 'FROZEN' | 'AMBIENT'
   pallets?: number | null;

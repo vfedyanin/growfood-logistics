@@ -19,6 +19,13 @@ function titleCity(raw: string): string {
   return lower.replace(/(^|[\s-])([а-яё])/g, (_m, sep, ch) => sep + ch.toUpperCase());
 }
 
+// Бренд/юрлицо = часть строки груза до «Самокат» («Королевский Вкус, Самокат КАЗАНЬ» → «Королевский Вкус»).
+// Сопоставление бренд → контрагент выполняется правилами импорта (brandMap), не здесь.
+function extractBrand(raw: string): string | null {
+  const before = raw.split(/самокат/i)[0].replace(/[,|]+\s*$/, '').trim();
+  return before || null;
+}
+
 function parseTime(spec: string): { from: string | null; to: string | null } {
   const range = spec.match(/(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/);
   if (range) return { from: range[1], to: range[2] };
@@ -93,6 +100,7 @@ export function parseKorolevskyVkus(ocrText: string): ParsedImport {
     cargoLines.push({
       rawName: cities[i].raw.slice(0, 120),
       city: cities[i].city,
+      brand: extractBrand(cities[i].raw),
       orderNumbers: [],
       tempRegime: 'COOLED', // КВ возит в +2..+4
       pallets: pallets[i] ?? null,
