@@ -22,6 +22,7 @@ const PICKUP_BLOCKS = [
 // в заданном порядке. Ключи — code локации и code клиента.
 const RETAIL_LAAS = [
   { locationCode: 'LOC_MG_TULA', customerCode: 'POLYANA' },
+  // Магнит НН — это РЦ Магнит Дзержинск, отдельной точки под Нижний у Магнита нет.
   { locationCode: 'LOC_MG_DZR', customerCode: 'POLYANA' },
   { locationCode: 'LOC_MG_VRN', customerCode: 'POLYANA' },
   { locationCode: 'LOC_MG_YAR', customerCode: 'POLYANA' },
@@ -95,7 +96,7 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
   // Блоки 1–2: отгрузка с точки забора. Строка — конечная точка выгрузки заявки.
   for (const b of PICKUP_BLOCKS) {
     const rows = dedupe(legs.filter((l) => l.pickupLocation?.code === b.locationCode)).map((l) => ({
-      label: l.cargo.request.deliveryLocation?.name ?? '?',
+      label: `${l.cargo.request.deliveryLocation?.name ?? '?'} - ${l.cargo.request.customer.name}`,
       pallets: l.cargo.pallets ?? 0,
     }));
     out.push(...block(`Отгрузка ${b.title} ${dayLabel}`, rows, 'палл'));
@@ -113,7 +114,7 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
     );
     if (!matched.length) continue;
     retailRows.push({
-      label: `${matched[0].cargo.request.deliveryLocation?.name ?? '?'}\t${matched[0].cargo.request.customer.name}`,
+      label: `${matched[0].cargo.request.deliveryLocation?.name ?? '?'} - ${matched[0].cargo.request.customer.name}`,
       pallets: matched.reduce((a, l) => a + (l.cargo.pallets ?? 0), 0),
     });
   }
@@ -124,7 +125,7 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
   for (const b of DIRECTION_BLOCKS) {
     const mine = dedupe(legs.filter((l) => l.direction?.code === b.directionCode));
     const rows = mine.map((l) => ({
-      label: l.cargo.request.deliveryLocation?.name ?? '?',
+      label: `${l.cargo.request.deliveryLocation?.name ?? '?'} - ${l.cargo.request.customer.name}`,
       pallets: l.cargo.pallets ?? 0,
     }));
     const dropoffs = mine.map((l) => l.plannedDropoff).filter(Boolean) as Date[];
