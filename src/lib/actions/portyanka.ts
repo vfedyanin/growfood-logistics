@@ -12,10 +12,25 @@
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/authz';
 
+// Порядок строк внутри блока задан вручную: письмо читают глазами, и привычный
+// порядок важнее алфавитного. Правило срабатывает по вхождению в название
+// конечной точки; меньше ранг — выше строка, без правила строка идёт в середину.
+type OrderRule = { match: string; rank: number };
+const DEFAULT_RANK = 50;
+
+function orderRows<T extends { label: string }>(rows: T[], rules: OrderRule[]): T[] {
+  const rank = (label: string) => rules.find((r) => label.includes(r.match))?.rank ?? DEFAULT_RANK;
+  // Сортировка устойчивая: строки с одинаковым рангом сохраняют исходный порядок.
+  return rows
+    .map((row, i) => ({ row, i, r: rank(row.label) }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((x) => x.row);
+}
+
 // Блоки 1–2: отгрузка с конкретной точки забора. Ключ — code локации.
-const PICKUP_BLOCKS = [
-  { locationCode: 'UMI', title: 'Йуми' },
-  { locationCode: 'INGREDICA', title: 'Ингредика' },
+const PICKUP_BLOCKS: { locationCode: string; title: string; order: OrderRule[] }[] = [
+  { locationCode: 'UMI', title: 'Йуми', order: [{ match: 'Дикси', rank: 90 }] },
+  { locationCode: 'INGREDICA', title: 'Ингредика', order: [] },
 ];
 
 // Блок 3: ритейлы LaaS. Фиксированный список пар «точка выгрузки + клиент»
@@ -33,12 +48,20 @@ const RETAIL_LAAS = [
   { locationCode: 'LOC-PEREKRESTOK-VESHKI', customerCode: 'ROSTICS' },
 ];
 
+// Во всех региональных направлениях КД ГФ идёт первой строкой.
+const KD_FIRST: OrderRule = { match: 'КД ', rank: 10 };
+
 // Блоки 4–7: направления. Ключ — code направления, подпись — как в письме.
-const DIRECTION_BLOCKS = [
-  { directionCode: 'MSK-VRN', title: 'в Воронеж' },
-  { directionCode: 'MSK-NN', title: 'в Нижний Новгород' },
-  { directionCode: 'MSK-NN-5KA', title: 'в Пятёрочку Нижний Новгород' },
-  { directionCode: 'MSK-KZN', title: 'в Казань' },
+const DIRECTION_BLOCKS: { directionCode: string; title: string; order: OrderRule[] }[] = [
+  { directionCode: 'MSK-VRN', title: 'в Воронеж', order: [KD_FIRST] },
+  { directionCode: 'MSK-NN', title: 'в Нижний Новгород', order: [KD_FIRST] },
+  { directionCode: 'MSK-NN-5KA', title: 'в Пятёрочку Нижний Новгород', order: [KD_FIRST] },
+  {
+    directionCode: 'MSK-KZN',
+    title: 'в Казань',
+    // Казань-город закрывает список, Яндекс Лавка Казань — самой последней.
+    order: [KD_FIRST, { match: 'Яндекс Лавка Казань', rank: 90 }, { match: 'Самокат Казань', rank: 80 }],
+  },
 ];
 
 const ddmm = (d: Date | null) =>
@@ -99,7 +122,7 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
       label: `${l.cargo.request.deliveryLocation?.name ?? '?'} - ${l.cargo.request.customer.name}`,
       pallets: l.cargo.pallets ?? 0,
     }));
-    out.push(...block(`Отгрузка ${b.title} ${dayLabel}`, rows, 'палл'));
+    out.push(...block(`Отгрузка ${b.title} ${dayLabel}`, orderRows(rows, b.order), 'палл'));
   }
 
   // Блок 3: ритейлы LaaS. Порядок строк задан списком, а не данными.
@@ -132,7 +155,7 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
     const arrival = dropoffs.length
       ? new Date(Math.min(...dropoffs.map((d) => d.getTime())))
       : null;
-    out.push(...block(`С ${dayLabel} на ${ddmm(arrival)} ${b.title} едет:`, rows, 'паллет'));
+    out.push(...block(`С ${dayLabel} на ${ddmm(arrival)} ${b.title} едет:`, orderRows(rows, b.order), 'паллет'));
   }
 
   return out.join('\n').trimEnd() || `На ${dayLabel} отгрузок нет.`;
