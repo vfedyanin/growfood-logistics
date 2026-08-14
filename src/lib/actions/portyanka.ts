@@ -51,7 +51,7 @@ const RETAIL_LAAS = [
 // Во всех региональных направлениях КД ГФ идёт первой строкой.
 const KD_FIRST: OrderRule = { match: 'КД ', rank: 10 };
 
-// Блоки 4–7: направления. Ключ — code направления, подпись — как в письме.
+// Блоки направлений в порядке письма. Ключ — code направления, подпись — как в письме.
 const DIRECTION_BLOCKS: { directionCode: string; title: string; order: OrderRule[] }[] = [
   { directionCode: 'MSK-VRN', title: 'в Воронеж', order: [KD_FIRST] },
   { directionCode: 'MSK-NN', title: 'в Нижний Новгород', order: [KD_FIRST] },
@@ -60,9 +60,21 @@ const DIRECTION_BLOCKS: { directionCode: string; title: string; order: OrderRule
     directionCode: 'MSK-KZN',
     title: 'в Казань',
     // Казань-город закрывает список, Яндекс Лавка Казань — самой последней.
+    // Разбивку на машины не делаем: развозят люди, объём блока может быть
+    // больше фуры и это нормально.
     order: [KD_FIRST, { match: 'Яндекс Лавка Казань', rank: 90 }, { match: 'Самокат Казань', rank: 80 }],
   },
+  { directionCode: 'MSK-VLG', title: 'в Волгоград', order: [KD_FIRST] },
+  { directionCode: 'MSK-RND', title: 'в Ростов-на-Дону', order: [KD_FIRST] },
+  { directionCode: 'MSK-KRS', title: 'в Краснодар', order: [KD_FIRST] },
+  { directionCode: 'MSK-PNZ', title: 'в Пензу', order: [KD_FIRST] },
+  { directionCode: 'MSK-FRESH', title: 'в Фрешмаркет', order: [KD_FIRST] },
 ];
+
+// В справочнике встречаются названия с задвоенными пробелами («РЦ Магнит  Воронеж»).
+// В письме это лишняя дыра, поэтому пробелы схлопываем на выводе. Сам справочник
+// не правим: письмо — не место чинить данные.
+const clean = (s: string | null | undefined) => (s ?? '?').replace(/\s+/g, ' ').trim();
 
 const ddmm = (d: Date | null) =>
   d ? String(d.getUTCDate()).padStart(2, '0') + '.' + String(d.getUTCMonth() + 1).padStart(2, '0') : '—';
@@ -119,7 +131,7 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
   // Блоки 1–2: отгрузка с точки забора. Строка — конечная точка выгрузки заявки.
   for (const b of PICKUP_BLOCKS) {
     const rows = dedupe(legs.filter((l) => l.pickupLocation?.code === b.locationCode)).map((l) => ({
-      label: `${l.cargo.request.deliveryLocation?.name ?? '?'} - ${l.cargo.request.customer.name}`,
+      label: `${clean(l.cargo.request.deliveryLocation?.name)} - ${clean(l.cargo.request.customer.name)}`,
       pallets: l.cargo.pallets ?? 0,
     }));
     out.push(...block(`Отгрузка ${b.title} ${dayLabel}`, orderRows(rows, b.order), 'палл'));
@@ -137,18 +149,18 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
     );
     if (!matched.length) continue;
     retailRows.push({
-      label: `${matched[0].cargo.request.deliveryLocation?.name ?? '?'} - ${matched[0].cargo.request.customer.name}`,
+      label: `${clean(matched[0].cargo.request.deliveryLocation?.name)} - ${clean(matched[0].cargo.request.customer.name)}`,
       pallets: matched.reduce((a, l) => a + (l.cargo.pallets ?? 0), 0),
     });
   }
   out.push(...block(`Отгрузка Ритейлы LAAS ${dayLabel}`, retailRows, 'палл'));
 
-  // Блоки 4–7: направления. Даты в шапке берутся с самих плеч направления —
+  // Блоки направлений. Даты в шапке берутся с самих плеч направления —
   // это и есть отгрузка и доставка магистрального плеча.
   for (const b of DIRECTION_BLOCKS) {
     const mine = dedupe(legs.filter((l) => l.direction?.code === b.directionCode));
     const rows = mine.map((l) => ({
-      label: `${l.cargo.request.deliveryLocation?.name ?? '?'} - ${l.cargo.request.customer.name}`,
+      label: `${clean(l.cargo.request.deliveryLocation?.name)} - ${clean(l.cargo.request.customer.name)}`,
       pallets: l.cargo.pallets ?? 0,
     }));
     const dropoffs = mine.map((l) => l.plannedDropoff).filter(Boolean) as Date[];
