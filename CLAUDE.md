@@ -73,3 +73,11 @@ npx prisma db execute --file /tmp/add_constraint.sql
 ## Скрипты для парсинга
 
 Если задача связана с парсингом УПД или ОСВ 1С — используй сохранённые шаблоны (см. user memories). Для УПД из Google Drive — `read_file_content` (текст), не `download_file_content` (base64).
+
+---
+
+## Личная память разработчиков
+
+Личные рабочие заметки лежат в папках `memory-<ник>/` и не смешиваются с этим файлом.
+
+@memory-bald-logist/CONTEXT.md
