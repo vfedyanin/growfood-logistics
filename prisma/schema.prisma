@@ -267,7 +267,6 @@ model VehicleType {
   marketPrices MarketPrice[]
   trips        Trip[]        @relation("TripVehicleType")
   tariffTiers  TariffTier[]
-  directions   Direction[]   @relation("DirectionVehicleType")
 }
 
 model AdditionalService {
@@ -490,23 +489,23 @@ model Direction {
   originId      String?
   destinationId String?
 
-  // Реквизиты автопланирования. Одно направление — один перевозчик, поэтому
-  // перевозчик живёт здесь, а не версионируется: у Trip своё carrierId, оно
-  // копируется при создании рейса, и смена перевозчика не переписывает историю.
-  carrierId       String?
-  // Тип ТС по умолчанию: с него начинается подбор машины под объём.
-  vehicleTypeCode String?
-  // РЕАЛЬНАЯ вместимость, а не справочная. У Трансхолода в справочнике 18 паллет,
-  // на Пятёрочку НН фактически грузят 20–22. По справочной алгоритм закажет две
-  // машины там, где ездит одна. Пусто — берём VehicleType.capacityPallets.
-  capacityPallets Int?
-  // Пусто = направление не настроено, автопланирование его не берёт.
-  splitMode       SplitMode?
+  // Реквизиты автопланирования — ровно два.
+  //
+  // Перевозчик: одно направление — один перевозчик. Живёт здесь и не
+  // версионируется: у Trip своё carrierId, оно копируется при создании рейса,
+  // поэтому смена перевозчика в справочнике не переписывает историю.
+  carrierId String?
+  // Режим набивки. Пусто = направление не настроено, автопланирование его не берёт.
+  splitMode SplitMode?
+  //
+  // Типа ТС и вместимости здесь НЕТ намеренно. Список типов, которые перебирает
+  // алгоритм, берётся из тарифов договора перевозчика на это направление: если у
+  // перевозчика в тарифах только восьмипаллетки, фуры взяться неоткуда.
+  // Вместимость каждого типа — из VehicleType.capacityPallets, в тарифе её нет.
 
-  origin        Location?    @relation("DirectionOrigin", fields: [originId], references: [id])
-  destination   Location?    @relation("DirectionDestination", fields: [destinationId], references: [id])
-  carrier       Carrier?     @relation(fields: [carrierId], references: [id])
-  vehicleType   VehicleType? @relation("DirectionVehicleType", fields: [vehicleTypeCode], references: [code])
+  origin      Location? @relation("DirectionOrigin", fields: [originId], references: [id])
+  destination Location? @relation("DirectionDestination", fields: [destinationId], references: [id])
+  carrier     Carrier?  @relation(fields: [carrierId], references: [id])
   trips         Trip[]
   tariffs       Tariff[]
   marketPrices  MarketPrice[]
