@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Button, InputNumber, Spin, Typography, Tooltip, Badge } from 'antd';
+import { Button, InputNumber, Spin, Typography, Tooltip, Badge, DatePicker, Modal, message } from 'antd';
 import {
   LeftOutlined, RightOutlined, CheckOutlined, DownOutlined,
   CheckCircleFilled, ExclamationCircleFilled, CloseCircleFilled,
@@ -11,6 +11,7 @@ import 'dayjs/locale/ru';
 import isoWeek from 'dayjs/plugin/isoWeek';
 import Link from 'next/link';
 import { getPlanningData, createPlanningRequest } from '@/lib/actions/planning';
+import { buildPortyanka } from '@/lib/actions/portyanka';
 
 dayjs.extend(isoWeek);
 dayjs.locale('ru');
@@ -106,6 +107,23 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
 
   const weekDates = DAYS.map((_, i) => weekStart.add(i, 'day'));
   const todayStr = dayjs().format('YYYY-MM-DD');
+
+  // ВРЕМЕННОЕ: портянка — письмо с объёмами на день для подрядчиков и складов.
+  // Дата по умолчанию — завтра: письмо шлют накануне отгрузки.
+  const [portDate, setPortDate] = useState(() => dayjs().add(1, 'day'));
+  const [portText, setPortText] = useState<string | null>(null);
+  const [portLoading, setPortLoading] = useState(false);
+
+  async function handlePortyanka() {
+    setPortLoading(true);
+    try {
+      setPortText(await buildPortyanka(portDate.format('YYYY-MM-DD')));
+    } catch (e) {
+      message.error('Не удалось собрать портянку: ' + (e as Error).message);
+    } finally {
+      setPortLoading(false);
+    }
+  }
 
   async function loadWeek(start: dayjs.Dayjs) {
     setLoading(true);
@@ -304,7 +322,52 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
           Сегодня
         </Button>
         {loading && <Spin size="small" />}
+
+        {/* ВРЕМЕННОЕ: вывод портянки. Удаляется вместе с actions/portyanka.ts. */}
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <DatePicker
+            size="small"
+            value={portDate}
+            onChange={(d) => d && setPortDate(d)}
+            format="DD.MM.YYYY"
+            allowClear={false}
+          />
+          <Button size="small" loading={portLoading} onClick={handlePortyanka}>
+            Вывести портянку
+          </Button>
+        </span>
       </div>
+
+      <Modal
+        open={portText !== null}
+        onCancel={() => setPortText(null)}
+        title={`Портянка на ${portDate.format('DD.MM.YYYY')}`}
+        width={720}
+        footer={[
+          <Button
+            key="copy"
+            onClick={() => {
+              navigator.clipboard.writeText(portText ?? '');
+              message.success('Скопировано');
+            }}
+          >
+            Скопировать
+          </Button>,
+          <Button key="close" type="primary" onClick={() => setPortText(null)}>
+            Закрыть
+          </Button>,
+        ]}
+      >
+        {/* Именно текстом: письмо уходит копипастой, без таблиц и разметки. */}
+        <pre
+          style={{
+            whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 13,
+            maxHeight: '60vh', overflowY: 'auto', margin: 0,
+          }}
+        >
+          {portText}
+        </pre>
+      </Modal>
 
       {groups.length === 0 && (
         <div style={{ textAlign: 'center', color: '#888', padding: 48 }}>
