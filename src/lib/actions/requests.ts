@@ -6,6 +6,9 @@ import { requireAuth, requireRole, getActorId, RoleName } from '@/lib/authz';
 import { revalidatePath } from 'next/cache';
 import { recomputeRequestFinals, getCustomerVatRate, addVat } from '@/lib/pricing';
 import { nextRequestNumber } from '@/lib/numbering';
+// Номер рейса и сборка грузовой единицы — в @/lib/tripFactory: их же использует
+// автопланирование, вторая реализация нумерации подралась бы на уникальном индексе.
+import { nextTripNumber, tcuFromCargo } from '@/lib/tripFactory';
 
 type RequestStatus = 'NEW' | 'CONFIRMED' | 'IN_PLANNING' | 'IN_TRANSIT' | 'DELIVERED' | 'CANCELLED';
 
@@ -289,22 +292,6 @@ export async function createInvoiceFromRequest(requestId: string) {
 }
 
 // ============ Плечо → рейс ============
-function tcuFromCargo(req: any, cargo: any, actor: string | null) {
-  return {
-    verticalCode: req.verticalCode || null,
-    customerId: cargo.consigneeId || req.consigneeId || req.customerId,
-    shipperId: req.shipperId || null,
-    unitType: cargo.unitType || 'PALLET',
-    pallets: cargo.pallets ?? null,
-    traysCount: cargo.traysCount ?? null,
-    weightKg: cargo.weightKg ?? null,
-    productCategory: cargo.productCategory || null,
-    tempRegime: cargo.tempRegime || null,
-    requestId: req.id,
-    createdById: actor,
-    updatedById: actor,
-  };
-}
 
 export async function addCargoLegToTrip(legId: string, tripId: string) {
   await requireRole(W);
@@ -322,16 +309,6 @@ export async function addCargoLegToTrip(legId: string, tripId: string) {
     if (Object.keys(updates).length) await prisma.trip.update({ where: { id: tripId }, data: updates });
   }
   revalidatePath('/requests'); revalidatePath('/operations/trips'); revalidatePath('/operations/cargo');
-}
-
-async function nextTripNumber(): Promise<string> {
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  const prefix = `TRIP-${ymd}-`;
-  const last = await prisma.trip.findFirst({ where: { tripNumber: { startsWith: prefix } }, orderBy: { tripNumber: 'desc' } });
-  let n = 1;
-  if (last) { const m = last.tripNumber.match(/(\d+)$/); if (m) n = parseInt(m[1]) + 1; }
-  return `${prefix}${String(n).padStart(3, '0')}`;
 }
 
 // Создаёт рейс и переносит ВСЕ непривязанные плечи заявки в него
