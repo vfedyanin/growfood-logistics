@@ -51,6 +51,15 @@ export type AutoPlanResult = {
  * Тариф относится к направлению, если у него стоит это направление ЛИБО совпадает
  * пара точек «забор → выгрузка»: в базе 107 из 121 тарифа перевозчиков ключуются
  * парой, а не направлением. Так же ключует карточка договора перевозчика.
+ *
+ * ВЕРСИОННОСТЬ. `validTo` не заполнен ни у одного тарифа перевозчика (0 из 125),
+ * поэтому «действующий» определяется ТОЛЬКО по `validFrom`: внутри одного ключа
+ * действует весь набор строк с самой поздней датой, а предыдущие даты — история.
+ * Так считает карточка договора (`dateGroups[0] = актуальный`), и так же надо
+ * здесь, иначе в подбор попадают закрытые типы машин: у Трансхолода версия от
+ * 20.06 содержит только VT-10 и VT-18, а VT-20 остался в версии от 01.03 —
+ * брать его нельзя, хотя `validTo` у него пуст.
+ *
  * Вместимость берём из справочника типов — в тарифе её нет.
  */
 async function vehicleOptions(
@@ -71,11 +80,31 @@ async function vehicleOptions(
       OR: [{ validTo: null }, { validTo: { gte: on } }],
       AND: [{ OR: [{ directionId: direction.id }, ...pair] }],
     },
-    select: { vehicleTypeCode: true, vehicleType: { select: { capacityPallets: true } } },
+    select: {
+      vehicleTypeCode: true,
+      validFrom: true,
+      directionId: true,
+      originLocationId: true,
+      destinationLocationId: true,
+      vehicleType: { select: { capacityPallets: true } },
+    },
   });
+
+  // Ключ как в карточке договора: направление, иначе пара точек.
+  const keyOf = (t: (typeof tariffs)[number]) =>
+    t.directionId ?? `${t.originLocationId ?? ''}_${t.destinationLocationId ?? ''}`;
+
+  // По каждому ключу оставляем только строки с самой поздней датой начала.
+  const latestByKey = new Map<string, number>();
+  for (const t of tariffs) {
+    const k = keyOf(t);
+    const ts = t.validFrom.getTime();
+    if (!latestByKey.has(k) || ts > latestByKey.get(k)!) latestByKey.set(k, ts);
+  }
 
   const byCode = new Map<string, number>();
   for (const t of tariffs) {
+    if (t.validFrom.getTime() !== latestByKey.get(keyOf(t))) continue; // историческая версия
     const cap = t.vehicleType?.capacityPallets;
     if (!t.vehicleTypeCode || !cap) continue; // без вместимости тип бесполезен
     byCode.set(t.vehicleTypeCode, cap);
@@ -154,6 +183,39 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
     unassignedLegs: legs.length,
     legsWithoutDirection: noDir.length,
   };
+}
+
+/**
+ * Счётчик нераспределённых плеч по дням недели для сетки планирования.
+ *
+ * Два числа на день намеренно: плеч без направления в базе больше двух третей,
+ * и одним числом счётчик был бы красным всегда. `total - noDirection` — то, что
+ * автоматика должна была разложить, вот это и есть сигнал.
+ */
+export async function getUnassignedByDay(weekStartISO: string) {
+  await requireAuth();
+  const weekStart = new Date(weekStartISO.slice(0, 10) + 'T00:00:00.000Z');
+  const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
+
+  const legs = await prisma.requestCargoLeg.findMany({
+    where: { plannedPickup: { gte: weekStart, lt: weekEnd }, tripCargoUnitId: null },
+    select: { plannedPickup: true, directionId: true, cargo: { select: { pallets: true } } },
+  });
+
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart.getTime() + i * 86400000);
+    return { date: d.toISOString().slice(0, 10), total: 0, noDirection: 0, pallets: 0 };
+  });
+  for (const l of legs) {
+    if (!l.plannedPickup) continue;
+    const key = l.plannedPickup.toISOString().slice(0, 10);
+    const slot = days.find((d) => d.date === key);
+    if (!slot) continue;
+    slot.total++;
+    slot.pallets += l.cargo.pallets ?? 0;
+    if (!l.directionId) slot.noDirection++;
+  }
+  return days;
 }
 
 /** Считает и сразу создаёт рейсы. Возвращает то же, что расчёт, плюс номера рейсов. */
