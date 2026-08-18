@@ -400,6 +400,8 @@ export async function getAllCargoLegs(filters?: {
   tripId?: string; unassigned?: boolean; customerId?: string;
   pickupFrom?: string; pickupTo?: string; dropoffFrom?: string; dropoffTo?: string;
   tripStatus?: string;
+  // Номер плеча: оператор распределяет пачкой либо заборы, либо магистрали.
+  legOrder?: number;
 }) {
   await requireAuth();
   const where: any = {};
@@ -412,6 +414,7 @@ export async function getAllCargoLegs(filters?: {
     if (Object.keys(tcu).length) where.tripCargoUnit = tcu;
   }
   if (filters?.customerId) where.cargo = { request: { customerId: filters.customerId } };
+  if (filters?.legOrder) where.legOrder = filters.legOrder;
   if (filters?.pickupFrom || filters?.pickupTo) {
     where.plannedPickup = {};
     if (filters.pickupFrom) where.plannedPickup.gte = new Date(filters.pickupFrom);
@@ -428,7 +431,9 @@ export async function getAllCargoLegs(filters?: {
       pickupLocation: true,
       dropoffLocation: true,
       tripCargoUnit: { include: { trip: true } },
-      cargo: { include: { consignee: true, request: { include: { customer: true } } } },
+      // deliveryLocation заявки нужен колонке «Куда в итоге»: у заборного плеча
+      // свои точки это «Йуми → РЦ МСК», по ним не понять, что за груз и куда едет.
+      cargo: { include: { consignee: true, request: { include: { customer: true, deliveryLocation: true } } } },
     },
     orderBy: { createdAt: 'desc' },
   });
