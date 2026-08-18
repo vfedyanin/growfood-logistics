@@ -5,6 +5,7 @@ import { serialize } from '@/lib/serialize';
 import { requireAuth, requirePermission, getActorId } from '@/lib/authz';
 import { getCustomerTariffMap } from '@/lib/pricing';
 import { revalidatePath } from 'next/cache';
+import { activeVehicleTypesForDirection } from '@/lib/carrierTariff';
 
 const W = 'references.write';
 
@@ -256,20 +257,65 @@ export async function deleteDriver(id: string) {
 // ============ Directions ============
 export async function getDirections() {
   await requireAuth();
-  return serialize(await prisma.direction.findMany({ orderBy: { code: 'asc' } }));
+  // carrier нужен колонке «Перевозчик» в справочнике направлений.
+  return serialize(await prisma.direction.findMany({
+    include: { carrier: { select: { id: true, name: true } } },
+    orderBy: { code: 'asc' },
+  }));
 }
+/**
+ * Перевозчика на направление можно поставить только если у него есть действующий
+ * тариф на это направление. Перевозчик из списка не убирается намеренно: пустой
+ * список ничего не объясняет, а внятная ошибка говорит, что именно надо завести.
+ *
+ * Следствие принято сознательно: направление нельзя настроить, пока нет тарифа.
+ * Это и нужно — автопланирование не должно создавать рейсы без стоимости.
+ */
+async function assertCarrierHasTariff(
+  directionId: string | null,
+  carrierId: string | null | undefined,
+  origin: { originId: string | null; destinationId: string | null },
+) {
+  if (!carrierId) return; // перевозчик не задан — проверять нечего
+  const carrier = await prisma.carrier.findUnique({ where: { id: carrierId }, select: { name: true } });
+  const types = directionId
+    ? await activeVehicleTypesForDirection({ id: directionId, ...origin }, carrierId, new Date())
+    : [];
+  if (!types.length) {
+    throw new Error(
+      `У перевозчика «${carrier?.name ?? carrierId}» нет действующего тарифа на это направление. ` +
+      'Заведите тариф в договоре перевозчика — без него рейс уедет без стоимости.',
+    );
+  }
+}
+
 export async function createDirection(data: any) {
   await requirePermission(W);
   const actor = await getActorId();
   const r = await prisma.direction.create({ data: { ...data, createdById: actor, updatedById: actor } });
+  // Проверяем ПОСЛЕ создания: до него нет id, а тариф ключуется направлением.
+  // Если тарифа нет — откатываем, иначе останется направление с перевозчиком,
+  // которого нельзя посчитать в деньгах.
+  try {
+    await assertCarrierHasTariff(r.id, data.carrierId, { originId: r.originId, destinationId: r.destinationId });
+  } catch (e) {
+    await prisma.direction.delete({ where: { id: r.id } });
+    throw e;
+  }
   revalidatePath('/references/directions');
   return r;
 }
 export async function updateDirection(id: string, data: any) {
   await requirePermission(W);
   const actor = await getActorId();
+  const cur = await prisma.direction.findUnique({ where: { id }, select: { originId: true, destinationId: true } });
+  await assertCarrierHasTariff(id, data.carrierId, {
+    originId: data.originId ?? cur?.originId ?? null,
+    destinationId: data.destinationId ?? cur?.destinationId ?? null,
+  });
   const r = await prisma.direction.update({ where: { id }, data: { ...data, updatedById: actor } });
   revalidatePath('/references/directions');
+  revalidatePath('/operations/planning');
   return r;
 }
 export async function deleteDirection(id: string) {

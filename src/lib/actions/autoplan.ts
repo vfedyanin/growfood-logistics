@@ -16,7 +16,10 @@ import { prisma } from '@/lib/prisma';
 import { requireAuth, requireRole, getActorId, RoleName } from '@/lib/authz';
 import { revalidatePath } from 'next/cache';
 import { nextTripNumber, tcuFromCargo } from '@/lib/tripFactory';
-import { packLegs, type VehicleOption, type PackedTruck } from '@/lib/autoplanCore';
+import { packLegs, type PackedTruck } from '@/lib/autoplanCore';
+// Отбор действующих тарифов перевозчика — общий модуль: этой же логикой
+// проверяется карточка направления при сохранении.
+import { activeVehicleTypesForDirection } from '@/lib/carrierTariff';
 
 const W: RoleName[] = ['LOGISTICS_MANAGER', 'LAAS_MANAGER', 'OWN_DISPATCHER'];
 
@@ -44,73 +47,6 @@ export type AutoPlanResult = {
   unassignedLegs: number;
   legsWithoutDirection: number;
 };
-
-/**
- * Типы ТС, доступные перевозчику на направлении, с вместимостью.
- *
- * Тариф относится к направлению, если у него стоит это направление ЛИБО совпадает
- * пара точек «забор → выгрузка»: в базе 107 из 121 тарифа перевозчиков ключуются
- * парой, а не направлением. Так же ключует карточка договора перевозчика.
- *
- * ВЕРСИОННОСТЬ. `validTo` не заполнен ни у одного тарифа перевозчика (0 из 125),
- * поэтому «действующий» определяется ТОЛЬКО по `validFrom`: внутри одного ключа
- * действует весь набор строк с самой поздней датой, а предыдущие даты — история.
- * Так считает карточка договора (`dateGroups[0] = актуальный`), и так же надо
- * здесь, иначе в подбор попадают закрытые типы машин: у Трансхолода версия от
- * 20.06 содержит только VT-10 и VT-18, а VT-20 остался в версии от 01.03 —
- * брать его нельзя, хотя `validTo` у него пуст.
- *
- * Вместимость берём из справочника типов — в тарифе её нет.
- */
-async function vehicleOptions(
-  direction: { id: string; originId: string | null; destinationId: string | null },
-  carrierId: string,
-  on: Date,
-): Promise<VehicleOption[]> {
-  const pair =
-    direction.originId && direction.destinationId
-      ? [{ originLocationId: direction.originId, destinationLocationId: direction.destinationId }]
-      : [];
-
-  const tariffs = await prisma.tariff.findMany({
-    where: {
-      carrierContract: { carrierId },
-      vehicleTypeCode: { not: null },
-      validFrom: { lte: on },
-      OR: [{ validTo: null }, { validTo: { gte: on } }],
-      AND: [{ OR: [{ directionId: direction.id }, ...pair] }],
-    },
-    select: {
-      vehicleTypeCode: true,
-      validFrom: true,
-      directionId: true,
-      originLocationId: true,
-      destinationLocationId: true,
-      vehicleType: { select: { capacityPallets: true } },
-    },
-  });
-
-  // Ключ как в карточке договора: направление, иначе пара точек.
-  const keyOf = (t: (typeof tariffs)[number]) =>
-    t.directionId ?? `${t.originLocationId ?? ''}_${t.destinationLocationId ?? ''}`;
-
-  // По каждому ключу оставляем только строки с самой поздней датой начала.
-  const latestByKey = new Map<string, number>();
-  for (const t of tariffs) {
-    const k = keyOf(t);
-    const ts = t.validFrom.getTime();
-    if (!latestByKey.has(k) || ts > latestByKey.get(k)!) latestByKey.set(k, ts);
-  }
-
-  const byCode = new Map<string, number>();
-  for (const t of tariffs) {
-    if (t.validFrom.getTime() !== latestByKey.get(keyOf(t))) continue; // историческая версия
-    const cap = t.vehicleType?.capacityPallets;
-    if (!t.vehicleTypeCode || !cap) continue; // без вместимости тип бесполезен
-    byCode.set(t.vehicleTypeCode, cap);
-  }
-  return Array.from(byCode.entries()).map(([code, capacity]) => ({ code, capacity }));
-}
 
 export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> {
   await requireAuth();
@@ -157,7 +93,7 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
     if (!dir.carrierId) { add('NO_CARRIER', dir.code, items); continue; }
     if (!dir.splitMode) { add('NOT_CONFIGURED', dir.code, items); continue; }
 
-    const vehicles = await vehicleOptions(dir, dir.carrierId, day);
+    const vehicles = await activeVehicleTypesForDirection(dir, dir.carrierId, day);
     if (!vehicles.length) { add('NO_TARIFF', dir.code, items); continue; }
 
     for (const truck of packLegs(items, vehicles, dir.splitMode)) {
