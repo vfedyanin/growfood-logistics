@@ -12,6 +12,7 @@ import isoWeek from 'dayjs/plugin/isoWeek';
 import Link from 'next/link';
 import { getPlanningData, createPlanningRequest } from '@/lib/actions/planning';
 import { buildPortyanka } from '@/lib/actions/portyanka';
+import { applyAutoPlan, getUnassignedByDay } from '@/lib/actions/autoplan';
 
 dayjs.extend(isoWeek);
 dayjs.locale('ru');
@@ -122,6 +123,35 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
       message.error('Не удалось собрать портянку: ' + (e as Error).message);
     } finally {
       setPortLoading(false);
+    }
+  }
+
+  // Автораспределение плеч по рейсам. Счётчик показывает два числа на день:
+  // всего нераспределённых плеч и сколько из них без направления. Одним числом он
+  // был бы красным всегда — плеч без направления в базе больше двух третей, и
+  // автоматика их не берёт намеренно, это ручная работа логиста.
+  const [counts, setCounts] = useState<{ date: string; total: number; noDirection: number; pallets: number }[]>([]);
+  const [planDate, setPlanDate] = useState(() => dayjs().add(1, 'day'));
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planResult, setPlanResult] = useState<any>(null);
+
+  async function loadCounts(start: dayjs.Dayjs) {
+    try {
+      setCounts(await getUnassignedByDay(start.format('YYYY-MM-DD')));
+    } catch { /* счётчик — подсказка, из-за него сетку не ломаем */ }
+  }
+  useEffect(() => { loadCounts(weekStart); /* eslint-disable-next-line */ }, [weekStart]);
+
+  async function handleAutoPlan() {
+    setPlanLoading(true);
+    try {
+      const res = await applyAutoPlan(planDate.format('YYYY-MM-DD'));
+      setPlanResult(res);
+      await loadCounts(weekStart);
+    } catch (e) {
+      message.error('Не удалось распределить: ' + (e as Error).message);
+    } finally {
+      setPlanLoading(false);
     }
   }
 
@@ -337,6 +367,63 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
           </Button>
         </span>
       </div>
+
+      {/* Нераспределённые плечи по дням: сколько работы осталось на каждый день.
+          Два числа намеренно — см. комментарий у loadCounts. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>Не распределено:</Text>
+        {weekDates.map((d, i) => {
+          const c = counts.find((x) => x.date === d.format('YYYY-MM-DD'));
+          const total = c?.total ?? 0;
+          const auto = total - (c?.noDirection ?? 0); // то, что должна была разложить автоматика
+          const isToday = d.format('YYYY-MM-DD') === todayStr;
+          return (
+            <Tooltip
+              key={d.format('YYYY-MM-DD')}
+              title={total
+                ? `${total} плеч на ${c?.pallets ?? 0} палл. Из них ${auto} с направлением — их берёт автораспределение, ${c?.noDirection ?? 0} без направления — только вручную.`
+                : 'все плечи этого дня привязаны к рейсам'}
+            >
+              <span style={{
+                display: 'inline-flex', gap: 6, alignItems: 'baseline',
+                border: `1px solid ${isToday ? '#91caff' : '#f0f0f0'}`,
+                background: total === 0 ? '#f6ffed' : isToday ? '#e6f4ff' : '#fafafa',
+                borderRadius: 6, padding: '2px 8px', fontSize: 12, cursor: 'default',
+              }}>
+                <span style={{ color: '#888' }}>{DAY_SHORT[i]}</span>
+                {total === 0
+                  ? <span style={{ color: '#52c41a' }}>—</span>
+                  : <>
+                      <span style={{ fontWeight: 600, color: auto > 0 ? '#d4380d' : '#595959' }}>{auto}</span>
+                      <span style={{ color: '#bfbfbf' }}>+{c?.noDirection ?? 0}</span>
+                    </>}
+              </span>
+            </Tooltip>
+          );
+        })}
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <DatePicker
+            size="small"
+            value={planDate}
+            onChange={(d) => d && setPlanDate(d)}
+            format="DD.MM.YYYY"
+            allowClear={false}
+          />
+          <Button size="small" type="primary" loading={planLoading} onClick={handleAutoPlan}>
+            Распределить по рейсам
+          </Button>
+        </span>
+      </div>
+
+      <Modal
+        open={planResult !== null}
+        onCancel={() => setPlanResult(null)}
+        title={`Распределение на ${planDate.format('DD.MM.YYYY')}`}
+        width={680}
+        footer={[<Button key="ok" type="primary" onClick={() => setPlanResult(null)}>Закрыть</Button>]}
+      >
+        {planResult && <AutoPlanReport res={planResult} />}
+      </Modal>
 
       <Modal
         open={portText !== null}
@@ -624,6 +711,77 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
         </div>
         );
       })}
+    </div>
+  );
+}
+
+// Итог распределения: что создали и что осталось логисту. Причины остатка
+// показываем словами — «нет направления» и «нет перевозчика» это не поломка,
+// а нормальная ручная работа, и текст должен читаться именно так.
+const SKIP_LABEL: Record<string, string> = {
+  NO_DIRECTION: 'у плеча не заполнено направление',
+  NO_CARRIER: 'у направления не задан перевозчик',
+  NOT_CONFIGURED: 'у направления не задан режим набивки',
+  NO_TARIFF: 'у перевозчика нет действующего тарифа на направление',
+};
+
+function AutoPlanReport({ res }: { res: any }) {
+  const overloads = (res.trips || []).filter((t: any) => t.overload);
+  return (
+    <div style={{ fontSize: 13 }}>
+      <div style={{ marginBottom: 12 }}>
+        Создано рейсов: <b>{res.createdTripNumbers?.length ?? 0}</b>
+        {overloads.length > 0 && (
+          <span style={{ color: '#ad6800', marginLeft: 12 }}>
+            с перебором: <b>{overloads.length}</b>
+          </span>
+        )}
+      </div>
+
+      {(res.trips || []).length > 0 && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
+          <thead>
+            <tr style={{ textAlign: 'left', color: '#888', fontSize: 12 }}>
+              <th style={{ padding: '4px 6px' }}>Направление</th>
+              <th style={{ padding: '4px 6px' }}>Перевозчик</th>
+              <th style={{ padding: '4px 6px' }}>Машина</th>
+              <th style={{ padding: '4px 6px', textAlign: 'right' }}>Паллет</th>
+              <th style={{ padding: '4px 6px', textAlign: 'right' }}>Плеч</th>
+            </tr>
+          </thead>
+          <tbody>
+            {res.trips.map((t: any, i: number) => (
+              <tr key={i} style={{ borderTop: '1px solid #f0f0f0', background: t.overload ? '#fff7e6' : undefined }}>
+                <td style={{ padding: '4px 6px' }}>{t.directionCode}</td>
+                <td style={{ padding: '4px 6px' }}>{t.carrierName}</td>
+                <td style={{ padding: '4px 6px' }}>
+                  {t.vehicleTypeCode}
+                  {t.overload && <span style={{ color: '#ad6800' }}> · перебор {t.pallets} на {t.capacity}</span>}
+                </td>
+                <td style={{ padding: '4px 6px', textAlign: 'right' }}>{t.pallets}</td>
+                <td style={{ padding: '4px 6px', textAlign: 'right' }}>{t.legIds?.length ?? 0}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {(res.skipped || []).length > 0 && (
+        <>
+          <div style={{ color: '#888', fontSize: 12, marginBottom: 4 }}>
+            Осталось логисту — {res.unassignedLegs - (res.trips || []).reduce((s: number, t: any) => s + (t.legIds?.length ?? 0), 0)} плеч:
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {res.skipped.map((s: any, i: number) => (
+              <li key={i}>
+                {s.directionCode ? <b>{s.directionCode}</b> : <b>без направления</b>}
+                {' — '}{SKIP_LABEL[s.reason] ?? s.reason}
+                {': '}{s.legs} плеч, {s.pallets} палл.
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }

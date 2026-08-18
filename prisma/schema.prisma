@@ -244,9 +244,10 @@ model Carrier {
   createdById   String?
   updatedById   String?
 
-  vehicles  Vehicle[]
-  drivers   Driver[]
-  contracts CarrierContract[]
+  vehicles   Vehicle[]
+  drivers    Driver[]
+  directions Direction[] // направления, закреплённые за перевозчиком
+  contracts  CarrierContract[]
   trips     Trip[]
   acts      CarrierAct[]
   invoices  Invoice[]
@@ -466,6 +467,15 @@ model MarketPrice {
 //  НАПРАВЛЕНИЯ
 // ============================================================
 
+// Режим набивки машин на направлении.
+// OVERLOAD — всё в одну машину, даже с перебором (Пятёрочка НН).
+// SPLIT — дробим по вместимости (Казань: 50–60 паллет в сутки — две фуры,
+// а в пятницу меньше 33 и хватает одной).
+enum SplitMode {
+  OVERLOAD
+  SPLIT
+}
+
 model Direction {
   id            String    @id @default(cuid())
   code          String    @unique
@@ -479,8 +489,23 @@ model Direction {
   originId      String?
   destinationId String?
 
-  origin        Location?  @relation("DirectionOrigin", fields: [originId], references: [id])
-  destination   Location?  @relation("DirectionDestination", fields: [destinationId], references: [id])
+  // Реквизиты автопланирования — ровно два.
+  //
+  // Перевозчик: одно направление — один перевозчик. Живёт здесь и не
+  // версионируется: у Trip своё carrierId, оно копируется при создании рейса,
+  // поэтому смена перевозчика в справочнике не переписывает историю.
+  carrierId String?
+  // Режим набивки. Пусто = направление не настроено, автопланирование его не берёт.
+  splitMode SplitMode?
+  //
+  // Типа ТС и вместимости здесь НЕТ намеренно. Список типов, которые перебирает
+  // алгоритм, берётся из тарифов договора перевозчика на это направление: если у
+  // перевозчика в тарифах только восьмипаллетки, фуры взяться неоткуда.
+  // Вместимость каждого типа — из VehicleType.capacityPallets, в тарифе её нет.
+
+  origin      Location? @relation("DirectionOrigin", fields: [originId], references: [id])
+  destination Location? @relation("DirectionDestination", fields: [destinationId], references: [id])
+  carrier     Carrier?  @relation(fields: [carrierId], references: [id])
   trips         Trip[]
   tariffs       Tariff[]
   marketPrices  MarketPrice[]

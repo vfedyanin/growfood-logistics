@@ -2,6 +2,13 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "node scripts/vercel-build.js",
   "crons": [
-    { "path": "/api/import/cron", "schedule": "0 * * * *" }
+    {
+      "path": "/api/import/cron",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/autoplan/cron",
+      "schedule": "0 22 * * *"
+    }
   ]
 }

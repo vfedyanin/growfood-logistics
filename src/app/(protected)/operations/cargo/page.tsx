@@ -43,6 +43,11 @@ export default function CargoPage() {
   // Статус по умолчанию «Без рейса»: логист открывает страницу, чтобы сразу
   // увидеть, что осталось нераспределённым на завтра, и работать с этим.
   const [fStatus, setFStatus] = useState<string | undefined>('NONE');
+  // Номер плеча: логист распределяет пачкой либо заборы, либо магистрали, и
+  // мешанина из тех и других в одном списке этому мешает. Фильтруем по номеру,
+  // а не по словам «забор» и «магистраль»: у шаблонов без заборного плеча
+  // магистраль идёт первой, и подписи по номеру врали бы.
+  const [fLegOrder, setFLegOrder] = useState<number | undefined>();
 
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -63,6 +68,7 @@ export default function CargoPage() {
         if (fStatus) filters.tripStatus = fStatus;
       }
       if (fCustomer) filters.customerId = fCustomer;
+      if (fLegOrder) filters.legOrder = fLegOrder;
       if (fPickup?.[0]) filters.pickupFrom = fPickup[0].startOf('day').toISOString();
       if (fPickup?.[1]) filters.pickupTo = fPickup[1].endOf('day').toISOString();
       if (fDropoff?.[0]) filters.dropoffFrom = fDropoff[0].startOf('day').toISOString();
@@ -70,7 +76,7 @@ export default function CargoPage() {
       setData(await getAllCargoLegs(filters));
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filterTrip, fCustomer, fPickup, fDropoff, fStatus]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filterTrip, fCustomer, fPickup, fDropoff, fStatus, fLegOrder]);
   useEffect(() => { getAllTripOptions().then(setTripOptions); }, []);
 
   const openAssign = (l: any) => { setAssigningLeg(l); assignForm.resetFields(); setAssignOpen(true); };
@@ -92,6 +98,12 @@ export default function CargoPage() {
     {
       title: 'Плечо', key: 'route',
       render: (_: any, l: any) => `${l.legOrder ? `#${l.legOrder} ` : ''}${l.pickupLocation?.name || '—'} → ${l.dropoffLocation?.name || '—'}`,
+    },
+    {
+      // Точки самого плеча ничего не говорят: у заборного это «Йуми → РЦ МСК».
+      // Конечная точка заявки отвечает на вопрос «что это за груз и куда едет».
+      title: 'Куда в итоге', key: 'finalDest',
+      render: (_: any, l: any) => l.cargo?.request?.deliveryLocation?.name || '—',
     },
     { title: 'Дата забора', dataIndex: 'plannedPickup', key: 'plannedPickup', render: fmtDate, width: 120 },
     { title: 'Дата выгрузки', dataIndex: 'plannedDropoff', key: 'plannedDropoff', render: fmtDate, width: 120 },
@@ -119,7 +131,7 @@ export default function CargoPage() {
 
   return (
     <>
-      <FilterBar onReset={() => { setFilterTrip(undefined); setFCustomer(undefined); setFPickup(null); setFDropoff(null); setFStatus(undefined); }}>
+      <FilterBar onReset={() => { setFilterTrip(undefined); setFCustomer(undefined); setFPickup(null); setFDropoff(null); setFStatus(undefined); setFLegOrder(undefined); }}>
         {/* «Без рейса» живёт здесь, а не в фильтре рейсов: два контрола с одним
             смыслом путали бы и могли противоречить друг другу. */}
         <Select
@@ -144,6 +156,14 @@ export default function CargoPage() {
           options={tripOptions}
         />
         <CustomerSelect placeholder="Заявитель" style={{ width: 200 }} value={fCustomer} onChange={setFCustomer} />
+        <Select
+          placeholder="Номер плеча"
+          allowClear
+          style={{ width: 150 }}
+          value={fLegOrder}
+          onChange={setFLegOrder}
+          options={[1, 2, 3, 4].map((n) => ({ value: n, label: `Плечо #${n}` }))}
+        />
         <DatePicker.RangePicker value={fPickup} onChange={setFPickup} onCalendarChange={setFPickup} format="DD.MM.YYYY" placeholder={['Забор с', 'Забор по']} />
         <DatePicker.RangePicker value={fDropoff} onChange={setFDropoff} onCalendarChange={setFDropoff} format="DD.MM.YYYY" placeholder={['Выгрузка с', 'Выгрузка по']} />
       </FilterBar>
