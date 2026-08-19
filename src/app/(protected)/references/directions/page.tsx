@@ -30,7 +30,12 @@ export default function DirectionsPage() {
   const onSubmit = async () => {
     const v = await form.validateFields();
     try {
-      if (editing) await updateDirection(editing.id, v); else await createDirection(v);
+      // Отказ по правилам (нет действующего тарифа у перевозчика) приходит полем
+      // error, а не исключением: сообщение брошенной ошибки production-сборка
+      // Next вырезает, и вместо объяснения пользователь видел обезличенное
+      // «An error occurred in the Server Components render».
+      const res = editing ? await updateDirection(editing.id, v) : await createDirection(v);
+      if (res && 'error' in res) { message.error(res.error); return; }
       message.success('Сохранено'); setOpen(false); load();
     } catch (e: any) { message.error(e?.message || 'Ошибка сохранения'); }
   };

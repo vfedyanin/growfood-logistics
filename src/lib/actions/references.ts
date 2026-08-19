@@ -270,53 +270,67 @@ export async function getDirections() {
  *
  * Следствие принято сознательно: направление нельзя настроить, пока нет тарифа.
  * Это и нужно — автопланирование не должно создавать рейсы без стоимости.
+ *
+ * ПОЧЕМУ ВОЗВРАЩАЕМ ТЕКСТ, А НЕ БРОСАЕМ ИСКЛЮЧЕНИЕ. В production-сборке Next
+ * вырезает сообщение любой ошибки, вышедшей из серверного действия, и клиент
+ * получает «An error occurred in the Server Components render… omitted in
+ * production builds» вместо объяснения. Именно это и видел пользователь на
+ * Елабуге, у которой тарифа нет. В `next dev` текст доходит, поэтому дефект и
+ * не заметили при разработке. Ошибка как ЗНАЧЕНИЕ переживает эту границу.
  */
-async function assertCarrierHasTariff(
+async function carrierTariffError(
   directionId: string | null,
   carrierId: string | null | undefined,
   origin: { originId: string | null; destinationId: string | null },
-) {
-  if (!carrierId) return; // перевозчик не задан — проверять нечего
+): Promise<string | null> {
+  if (!carrierId) return null; // перевозчик не задан — проверять нечего
   const carrier = await prisma.carrier.findUnique({ where: { id: carrierId }, select: { name: true } });
   const types = directionId
     ? await activeVehicleTypesForDirection({ id: directionId, ...origin }, carrierId, new Date())
     : [];
-  if (!types.length) {
-    throw new Error(
-      `У перевозчика «${carrier?.name ?? carrierId}» нет действующего тарифа на это направление. ` +
-      'Заведите тариф в договоре перевозчика — без него рейс уедет без стоимости.',
-    );
-  }
+  if (types.length) return null;
+  return (
+    `У перевозчика «${carrier?.name ?? carrierId}» нет действующего тарифа на это направление. ` +
+    'Заведите тариф в договоре перевозчика — без него рейс уедет без стоимости.'
+  );
 }
 
-export async function createDirection(data: any) {
+// Результат сохранения направления. `serialize` обязателен: у направления
+// distanceKm — Decimal, а Decimal через границу серверного действия не проходит
+// и роняет рендер той же обезличенной ошибкой, что и текст выше.
+type DirectionSaveResult = { error: string } | { direction: any };
+
+export async function createDirection(data: any): Promise<DirectionSaveResult> {
   await requirePermission(W);
   const actor = await getActorId();
   const r = await prisma.direction.create({ data: { ...data, createdById: actor, updatedById: actor } });
   // Проверяем ПОСЛЕ создания: до него нет id, а тариф ключуется направлением.
   // Если тарифа нет — откатываем, иначе останется направление с перевозчиком,
   // которого нельзя посчитать в деньгах.
-  try {
-    await assertCarrierHasTariff(r.id, data.carrierId, { originId: r.originId, destinationId: r.destinationId });
-  } catch (e) {
+  const err = await carrierTariffError(r.id, data.carrierId, {
+    originId: r.originId,
+    destinationId: r.destinationId,
+  });
+  if (err) {
     await prisma.direction.delete({ where: { id: r.id } });
-    throw e;
+    return { error: err };
   }
   revalidatePath('/references/directions');
-  return r;
+  return { direction: serialize(r) };
 }
-export async function updateDirection(id: string, data: any) {
+export async function updateDirection(id: string, data: any): Promise<DirectionSaveResult> {
   await requirePermission(W);
   const actor = await getActorId();
   const cur = await prisma.direction.findUnique({ where: { id }, select: { originId: true, destinationId: true } });
-  await assertCarrierHasTariff(id, data.carrierId, {
+  const err = await carrierTariffError(id, data.carrierId, {
     originId: data.originId ?? cur?.originId ?? null,
     destinationId: data.destinationId ?? cur?.destinationId ?? null,
   });
+  if (err) return { error: err };
   const r = await prisma.direction.update({ where: { id }, data: { ...data, updatedById: actor } });
   revalidatePath('/references/directions');
   revalidatePath('/operations/planning');
-  return r;
+  return { direction: serialize(r) };
 }
 export async function deleteDirection(id: string) {
   await requirePermission(W);
