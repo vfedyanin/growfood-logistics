@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Button, Form, Input, Switch, Space, Popconfirm, Tag, message, InputNumber, Select, Tooltip } from 'antd';
+import { Button, Form, Input, Switch, Space, Popconfirm, Tag, message, Modal, InputNumber, Select, Tooltip } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -35,7 +35,18 @@ export default function DirectionsPage() {
       // Next вырезает, и вместо объяснения пользователь видел обезличенное
       // «An error occurred in the Server Components render».
       const res = editing ? await updateDirection(editing.id, v) : await createDirection(v);
-      if (res && 'error' in res) { message.error(res.error); return; }
+      if (res && 'error' in res) {
+        // Модальным окном, а не всплывающим message: это не «что-то сломалось», а
+        // сознательный стоп с инструкцией на две фразы — тост погас бы раньше,
+        // чем её дочитали. Карточку не закрываем, чтобы введённое не потерялось.
+        Modal.warning({
+          title: 'Нельзя поставить этого перевозчика',
+          content: <div style={{ whiteSpace: 'pre-line' }}>{res.error}</div>,
+          okText: 'Понятно',
+          width: 520,
+        });
+        return;
+      }
       message.success('Сохранено'); setOpen(false); load();
     } catch (e: any) { message.error(e?.message || 'Ошибка сохранения'); }
   };

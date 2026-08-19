@@ -279,19 +279,24 @@ export async function getDirections() {
  * не заметили при разработке. Ошибка как ЗНАЧЕНИЕ переживает эту границу.
  */
 async function carrierTariffError(
-  directionId: string | null,
+  direction: { id: string; code: string } | null,
   carrierId: string | null | undefined,
   origin: { originId: string | null; destinationId: string | null },
 ): Promise<string | null> {
   if (!carrierId) return null; // перевозчик не задан — проверять нечего
   const carrier = await prisma.carrier.findUnique({ where: { id: carrierId }, select: { name: true } });
-  const types = directionId
-    ? await activeVehicleTypesForDirection({ id: directionId, ...origin }, carrierId, new Date())
+  const types = direction
+    ? await activeVehicleTypesForDirection({ id: direction.id, ...origin }, carrierId, new Date())
     : [];
   if (types.length) return null;
+  // Направление называем кодом: у логиста открыто несколько карточек, и «это
+  // направление» без имени не помогает понять, где именно не хватает тарифа.
   return (
-    `У перевозчика «${carrier?.name ?? carrierId}» нет действующего тарифа на это направление. ` +
-    'Заведите тариф в договоре перевозчика — без него рейс уедет без стоимости.'
+    `У перевозчика «${carrier?.name ?? carrierId}» нет действующего тарифа на направление ` +
+    `${direction?.code ?? '—'}. Поставить его перевозчиком нельзя: без тарифа рейс ` +
+    'уедет без стоимости, а автопланирование такие рейсы создавать не должно.\n\n' +
+    'Что сделать: заведите тариф на это направление в договоре перевозчика, ' +
+    'после этого возвращайтесь сюда.'
   );
 }
 
@@ -307,7 +312,7 @@ export async function createDirection(data: any): Promise<DirectionSaveResult> {
   // Проверяем ПОСЛЕ создания: до него нет id, а тариф ключуется направлением.
   // Если тарифа нет — откатываем, иначе останется направление с перевозчиком,
   // которого нельзя посчитать в деньгах.
-  const err = await carrierTariffError(r.id, data.carrierId, {
+  const err = await carrierTariffError({ id: r.id, code: r.code }, data.carrierId, {
     originId: r.originId,
     destinationId: r.destinationId,
   });
@@ -321,8 +326,11 @@ export async function createDirection(data: any): Promise<DirectionSaveResult> {
 export async function updateDirection(id: string, data: any): Promise<DirectionSaveResult> {
   await requirePermission(W);
   const actor = await getActorId();
-  const cur = await prisma.direction.findUnique({ where: { id }, select: { originId: true, destinationId: true } });
-  const err = await carrierTariffError(id, data.carrierId, {
+  const cur = await prisma.direction.findUnique({
+    where: { id },
+    select: { code: true, originId: true, destinationId: true },
+  });
+  const err = await carrierTariffError({ id, code: data.code ?? cur?.code ?? '' }, data.carrierId, {
     originId: data.originId ?? cur?.originId ?? null,
     destinationId: data.destinationId ?? cur?.destinationId ?? null,
   });
