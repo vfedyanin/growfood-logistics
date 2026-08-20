@@ -17,6 +17,7 @@ import {
   addTripCargoUnit, removeTripCargoUnit, addQualityEvent, calculateTripEconomics, completeTripQuick,
 } from '@/lib/actions/trips';
 import { addCargoLegToTrip, getUnassignedCargoLegOptions } from '@/lib/actions/requests';
+import { getRouteStops } from '@/lib/actions/references';
 import { usePermissions } from '@/hooks/usePermissions';
 import AsyncSelect from '@/components/selects/AsyncSelect';
 import { CustomerSelect } from '@/components/selects/EntitySelects';
@@ -72,12 +73,19 @@ const effectiveVehicleType = (t: any) => t?.vehicle?.vehicleType?.name || t?.veh
 interface Stop {
   id: string;
   loc: any;
-  sortKey: number;
+  pos: number;     // позиция точки в маршруте направления; вне маршрута — в конец
+  sortKey: number; // время (вторичный ключ и полный fallback, если маршрута нет)
   load: any[];   // cargoUnits, у которых pickupLocation = эта точка
   unload: any[]; // cargoUnits, у которых dropoffLocation = эта точка
 }
 
-function buildStops(units: any[]): Stop[] {
+// orderMap: locationId → позиция в маршруте направления (RouteStop). Если задан —
+// порядок объезда берётся ОТСЮДА (первичный ключ), а время плеча остаётся
+// вторичным. Без маршрута (orderMap пуст) сортировка идёт по времени, как раньше.
+// Так чинится порядок, где окна плеч выставлены криво (КД КЗН с 17:00 не должен
+// идти раньше Самоката 12–14, если в маршруте Самокат стоит первым).
+function buildStops(units: any[], orderMap?: Map<string, number>): Stop[] {
+  const posOf = (locId: string) => orderMap?.get(locId) ?? Number.MAX_SAFE_INTEGER;
   const map = new Map<string, Stop>();
   units.forEach(u => {
     const leg = u.requestCargoLeg;
@@ -85,19 +93,19 @@ function buildStops(units: any[]): Stop[] {
     const pt = leg.plannedPickup ? +new Date(leg.plannedPickup) : (leg.legOrder ?? 0) * 1e9;
     const dt2 = leg.plannedDropoff ? +new Date(leg.plannedDropoff) : pt + 1;
     if (leg.pickupLocationId && leg.pickupLocation) {
-      if (!map.has(leg.pickupLocationId)) map.set(leg.pickupLocationId, { id: leg.pickupLocationId, loc: leg.pickupLocation, sortKey: pt, load: [], unload: [] });
+      if (!map.has(leg.pickupLocationId)) map.set(leg.pickupLocationId, { id: leg.pickupLocationId, loc: leg.pickupLocation, pos: posOf(leg.pickupLocationId), sortKey: pt, load: [], unload: [] });
       const s = map.get(leg.pickupLocationId)!;
       if (pt < s.sortKey) s.sortKey = pt;
       s.load.push(u);
     }
     if (leg.dropoffLocationId && leg.dropoffLocation) {
-      if (!map.has(leg.dropoffLocationId)) map.set(leg.dropoffLocationId, { id: leg.dropoffLocationId, loc: leg.dropoffLocation, sortKey: dt2, load: [], unload: [] });
+      if (!map.has(leg.dropoffLocationId)) map.set(leg.dropoffLocationId, { id: leg.dropoffLocationId, loc: leg.dropoffLocation, pos: posOf(leg.dropoffLocationId), sortKey: dt2, load: [], unload: [] });
       const s = map.get(leg.dropoffLocationId)!;
       if (dt2 < s.sortKey) s.sortKey = dt2;
       s.unload.push(u);
     }
   });
-  return Array.from(map.values()).sort((a, b) => a.sortKey - b.sortKey);
+  return Array.from(map.values()).sort((a, b) => (a.pos - b.pos) || (a.sortKey - b.sortKey));
 }
 
 // Груз, который ЕДЕТ В МАШИНЕ после точки с индексом fromIdx (т.е. погружен ≤ fromIdx, выгружается > fromIdx)
@@ -118,10 +126,10 @@ function pallets(units: any[]) {
   return units.reduce((s: number, u: any) => s + (Number(u.pallets) || 0), 0);
 }
 
-function calcMaxPallets(cargoUnits: any[]): number {
+function calcMaxPallets(cargoUnits: any[], orderMap?: Map<string, number>): number {
   const withLeg = cargoUnits.filter(u => u.requestCargoLeg);
   if (!withLeg.length) return pallets(cargoUnits); // нет плеч — считаем просто сумму
-  const stops = buildStops(withLeg);
+  const stops = buildStops(withLeg, orderMap);
   if (stops.length === 0) return 0;
   if (stops.length === 1) return pallets(withLeg); // одна точка — всё грузится/выгружается там
   let max = 0;
@@ -271,11 +279,11 @@ function TransitRow({ units }: { units: any[] }) {
   );
 }
 
-function TripStopsView({ cargoUnits, canRemove, onRemove }: { cargoUnits: any[]; canRemove: boolean; onRemove: (id: string) => void }) {
+function TripStopsView({ cargoUnits, canRemove, onRemove, orderMap }: { cargoUnits: any[]; canRemove: boolean; onRemove: (id: string) => void; orderMap?: Map<string, number> }) {
   const withLeg = cargoUnits.filter(u => u.requestCargoLeg);
   const noLeg = cargoUnits.filter(u => !u.requestCargoLeg);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const stops = useMemo(() => buildStops(withLeg), [cargoUnits]);
+  const stops = useMemo(() => buildStops(withLeg, orderMap), [cargoUnits, orderMap]);
 
   // Для каждого requestId — конечная точка (последнее плечо по sortKey)
   const finalDestMap = useMemo(() => {
@@ -338,6 +346,9 @@ export default function TripDetailPage() {
 
   const [trip, setTrip] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  // Порядок объезда из маршрута направления: locationId → позиция. Пусто, если у
+  // направления маршрут не заведён — тогда остановки идут по времени, как раньше.
+  const [orderMap, setOrderMap] = useState<Map<string, number>>(new Map());
 
   // под-модалки
   const [depForm] = Form.useForm();
@@ -353,7 +364,7 @@ export default function TripDetailPage() {
   const [completeForm] = Form.useForm();
   const [completeOpen, setCompleteOpen] = useState(false);
 
-  const maxPallets = useMemo(() => calcMaxPallets(trip?.cargoUnits || []), [trip]);
+  const maxPallets = useMemo(() => calcMaxPallets(trip?.cargoUnits || [], orderMap), [trip, orderMap]);
   const vtCapacity = parseVtCapacity(effectiveVehicleType(trip));
   const overCapacity = vtCapacity !== null && maxPallets > vtCapacity;
 
@@ -361,6 +372,16 @@ export default function TripDetailPage() {
     try {
       const t = await getTrip(id);
       setTrip(t);
+      // Маршрут направления — для порядка остановок. Не критично: если не
+      // подтянулся, остановки просто отсортируются по времени.
+      if (t?.directionId) {
+        try {
+          const s = await getRouteStops(t.directionId);
+          setOrderMap(new Map(s.map((x: any) => [x.locationId, x.position])));
+        } catch { setOrderMap(new Map()); }
+      } else {
+        setOrderMap(new Map());
+      }
     } catch (e: any) {
       message.error(`Ошибка загрузки рейса: ${e?.message || e}`);
     }
@@ -567,6 +588,7 @@ export default function TripDetailPage() {
         cargoUnits={trip.cargoUnits || []}
         canRemove={canCargo}
         onRemove={removeCargo}
+        orderMap={orderMap}
       />
 
       {/* События качества */}
