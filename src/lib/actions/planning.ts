@@ -195,6 +195,13 @@ export async function createPlanningRequest(input: {
   // Число в графике оставлено как «возим/не возим» и как fallback для шаблонов,
   // где смещения ещё не заданы.
   const tplLegs: any[] = ((tplData?.cargoes) || []).flatMap((c: any) => c.legs || []);
+
+  // Направление обязательно у каждого плеча: заявка из планирования наследует его
+  // из шаблона, и если в шаблоне плечо без направления, оно тихо выпадет из
+  // автораспределения и рейс не оттарифицируется. Не создаём такую заявку вовсе.
+  if (tplLegs.some((l) => !l.directionId)) {
+    throw new Error('В шаблоне есть плечо без направления — заполните направление у всех плеч шаблона.');
+  }
   const maxDropoffOffset = tplLegs.reduce(
     (max: number | null, l: any) =>
       l.dropoffDayOffset != null ? Math.max(max ?? 0, Number(l.dropoffDayOffset)) : max,

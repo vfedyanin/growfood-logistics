@@ -76,6 +76,23 @@ function cargoCreateData(c: any, actor: string | null) {
     legs: { create: (c.legs || []).map((l: any, i: number) => legCreateData(l, i + 1, actor)) },
   };
 }
+
+// Направление обязательно у КАЖДОГО плеча. Без него плечо не попадает в
+// автораспределение (оно группирует по направлению) и рейс нельзя
+// оттарифицировать — тариф магистрали привязан к направлению, а не к точкам.
+// Раньше это не проверялось, и плечи из заявок мимо шаблона (ручных, импортных)
+// оставались без направления и тихо выпадали из планирования. Формы помечают
+// поле required для подсказки, но правда — здесь: заявку без направления у плеча
+// создать нельзя ни одним путём.
+function assertLegsHaveDirection(cargoes: any[]) {
+  for (const c of cargoes || []) {
+    for (const l of c.legs || []) {
+      if (!l.directionId) {
+        throw new Error('У каждого плеча заявки должно быть выбрано направление.');
+      }
+    }
+  }
+}
 // Карта тарифов и пересчёт итогов переехали в @/lib/pricing — их использует и
 // планирование при создании заявки из сетки. Логика поиска тарифа сохранена
 // как в main: по плательщику с фолбэком на заказчика, источник — clientTariff.
@@ -176,6 +193,7 @@ export async function createRequest(input: any) {
   await requireRole(W);
   const actor = await getActorId();
   const { cargoes = [], ...data } = input;
+  assertLegsHaveDirection(cargoes);
   const requestNumber = await nextNumber('REQ');
   const r = await prisma.customerRequest.create({
     data: {
@@ -228,6 +246,7 @@ export async function deleteRequest(id: string) {
 export async function addRequestCargo(requestId: string, data: any) {
   await requireRole(W);
   const actor = await getActorId();
+  assertLegsHaveDirection([data]);
   await prisma.requestCargo.create({ data: { ...cargoCreateData(data, actor), requestId } });
   await recomputeRequestFinals(requestId);
   revalidatePath('/requests');
@@ -237,6 +256,7 @@ export async function updateRequestCargo(id: string, data: any) {
   await requireRole(W);
   const actor = await getActorId();
   const { legs = [], ...rest } = data;
+  assertLegsHaveDirection([{ legs }]);
   const sc = cargoScalar(rest, actor);
   delete (sc as any).createdById;
   const updated = await prisma.requestCargo.update({ where: { id }, data: sc, select: { requestId: true } });
