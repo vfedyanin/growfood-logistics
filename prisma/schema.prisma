@@ -125,6 +125,7 @@ model Location {
   requestsAsDelivery  CustomerRequest[] @relation("ReqDelivery")
   reqLegAsPickup      RequestCargoLeg[] @relation("RCLPickup")
   reqLegAsDropoff     RequestCargoLeg[] @relation("RCLDropoff")
+  routeStops          RouteStop[]       @relation("RouteStopLocation")
   reqCargoAsConsignee     RequestCargo[]    @relation("RCConsigneeLocation")
   directionsAsOrigin      Direction[]       @relation("DirectionOrigin")
   directionsAsDestination Direction[]       @relation("DirectionDestination")
@@ -511,8 +512,30 @@ model Direction {
   marketPrices  MarketPrice[]
   legs          RequestCargoLeg[]
   schedules     DirectionSchedule[]
+  stops         RouteStop[]
 
   @@map("Route")
+}
+
+// Каркас маршрута направления: упорядоченный список точек, которые машина
+// объезжает (Йуми → КД Север → КД НН → ЯЛ НН → Самокат НН). Это МАКСИМАЛЬНЫЙ
+// маршрут; автораспределение раскладывает фактические плечи дня в этом порядке,
+// а точки без груза пропускает. Порядок остановок берётся ОТСЮДА, времена — из
+// окон плеч заявки (plannedPickup/Dropoff), отдельного окна на точке нет.
+// Направление без остановок автоматика обрабатывает по-старому (пара точек).
+model RouteStop {
+  id          String   @id @default(cuid())
+  directionId String
+  locationId  String
+  position    Int      // порядок объезда, 1 = первый заезд
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  direction Direction @relation(fields: [directionId], references: [id], onDelete: Cascade)
+  location  Location  @relation("RouteStopLocation", fields: [locationId], references: [id])
+
+  @@unique([directionId, position])
+  @@index([directionId])
 }
 
 // ============================================================

@@ -346,6 +346,34 @@ export async function deleteDirection(id: string) {
   revalidatePath('/references/directions');
 }
 
+// ============ Маршрут направления (каркас для автораспределения) ============
+// Упорядоченный список точек, которые машина объезжает. Автораспределение
+// раскладывает фактические плечи дня в этом порядке; точки без груза пропускает.
+export async function getRouteStops(directionId: string) {
+  await requireAuth();
+  const stops = await prisma.routeStop.findMany({
+    where: { directionId },
+    orderBy: { position: 'asc' },
+    include: { location: { select: { id: true, code: true, name: true } } },
+  });
+  return serialize(stops);
+}
+
+// Заменяем весь список целиком: так проще, чем поштучный дифф, и порядок
+// пересобирается заново от 1. Уникальность (directionId, position) не конфликтует —
+// старые строки удаляются в той же транзакции до вставки новых.
+export async function setRouteStops(directionId: string, locationIds: string[]) {
+  await requirePermission(W);
+  await prisma.$transaction([
+    prisma.routeStop.deleteMany({ where: { directionId } }),
+    ...locationIds.map((locationId, i) =>
+      prisma.routeStop.create({ data: { directionId, locationId, position: i + 1 } }),
+    ),
+  ]);
+  revalidatePath('/references/directions');
+  revalidatePath('/operations/planning');
+}
+
 // ============ Option-getters для селектов ============
 export async function getVerticalOptions() {
   await requireAuth();
