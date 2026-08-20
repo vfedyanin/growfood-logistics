@@ -96,7 +96,7 @@ function LegFields({ name, restField, showPrice, templateMode }: { name: number;
     <Space wrap size="small">
       <Form.Item {...restField} name={[name, 'pickupLocationId']} label="Забор"><LocationSelect style={{ width: 180 }} /></Form.Item>
       <Form.Item {...restField} name={[name, 'dropoffLocationId']} label="Выгрузка"><LocationSelect style={{ width: 180 }} /></Form.Item>
-      <Form.Item {...restField} name={[name, 'directionId']} label="Направление"><DirectionSelect style={{ width: 180 }} /></Form.Item>
+      <Form.Item {...restField} name={[name, 'directionId']} label="Направление" rules={[{ required: true, message: 'Укажите направление' }]}><DirectionSelect style={{ width: 180 }} /></Form.Item>
       {templateMode ? (
         <Form.Item {...restField} name={[name, 'pickupDayOffset']} label="День забора" initialValue={0}>
           <InputNumber min={0} max={14} precision={0} addonBefore="X+" style={{ width: 96 }} />

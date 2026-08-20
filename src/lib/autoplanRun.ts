@@ -22,7 +22,7 @@ import { nextTripNumber, tcuFromCargo } from '@/lib/tripFactory';
 import { packLegs, type PackedTruck } from '@/lib/autoplanCore';
 // Отбор действующих тарифов перевозчика — общий модуль: этой же логикой
 // проверяется карточка направления при сохранении.
-import { activeVehicleTypesForDirection } from '@/lib/carrierTariff';
+import { activeVehicleTypesForDirection, activeCarrierTripCost } from '@/lib/carrierTariff';
 
 export type SkipReason =
   | 'NO_DIRECTION'   // у плеча не заполнено направление
@@ -161,7 +161,7 @@ export async function applyAutoPlan(dateISO: string, actor: string | null) {
   for (const t of plan.trips) {
     const dir = await prisma.direction.findUnique({
       where: { id: t.directionId },
-      select: { originId: true, destinationId: true },
+      select: { originId: true, destinationId: true, distanceKm: true },
     });
     if (!dir?.originId || !dir?.destinationId) continue; // без точек рейс не создать
 
@@ -171,6 +171,18 @@ export async function applyAutoPlan(dateISO: string, actor: string | null) {
       select: { cargo: { select: { request: { select: { verticalCode: true } } } } },
     });
     const verticalCode = first?.cargo.request.verticalCode ?? null;
+
+    // Стоимость по тарифу перевозчика — сразу при создании, тем же ключом
+    // (направление/пара точек), что и подбор машины. Раньше автоплан оставлял
+    // actualCost пустым, и рейсы шли без денег. На дату выезда, иначе на день плана.
+    const costDate = t.plannedDeparture ?? new Date(dateISO.slice(0, 10) + 'T00:00:00.000Z');
+    const actualCost = await activeCarrierTripCost(
+      { id: t.directionId, originId: dir.originId, destinationId: dir.destinationId, distanceKm: dir.distanceKm != null ? Number(dir.distanceKm) : null },
+      t.carrierId,
+      t.vehicleTypeCode,
+      t.pallets,
+      costDate,
+    );
 
     const trip = await prisma.trip.create({
       data: {
@@ -183,6 +195,7 @@ export async function applyAutoPlan(dateISO: string, actor: string | null) {
         carrierId: t.carrierId,
         vehicleTypeCode: t.vehicleTypeCode,
         plannedPallets: t.pallets,
+        actualCost,
         plannedDeparture: t.plannedDeparture,
         plannedArrival: t.plannedArrival,
         status: 'DRAFT',

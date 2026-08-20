@@ -67,6 +67,21 @@ export async function getTripTemplateFull(id: string) {
 }
 
 // ============ Шаблоны заявок ============
+
+// Шаблон — первоисточник направления для заявок из планирования. Если у плеча
+// шаблона нет направления, оно уйдёт в заявку пустым, плечо выпадет из
+// автораспределения и рейс не оттарифицируется. Поэтому шаблон с плечом без
+// направления сохранить нельзя.
+function assertTemplateLegsHaveDirection(data: any) {
+  for (const c of data?.cargoes ?? []) {
+    for (const l of c.legs ?? []) {
+      if (!l.directionId) {
+        throw new Error('У каждого плеча шаблона должно быть выбрано направление.');
+      }
+    }
+  }
+}
+
 export async function getRequestTemplates() {
   await requireAuth();
   return prisma.requestTemplate.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, updatedAt: true } });
@@ -77,6 +92,7 @@ export async function getRequestTemplate(id: string) {
 }
 export async function createRequestTemplate(name: string, data: any) {
   await requireRole(W);
+  assertTemplateLegsHaveDirection(data);
   const actor = await getActorId();
   const r = await prisma.requestTemplate.create({ data: { name, data, createdById: actor, updatedById: actor } });
   revalidatePath('/requests');
@@ -84,6 +100,7 @@ export async function createRequestTemplate(name: string, data: any) {
 }
 export async function updateRequestTemplate(id: string, payload: { name?: string; data?: any }) {
   await requireRole(W);
+  if (payload.data !== undefined) assertTemplateLegsHaveDirection(payload.data);
   const actor = await getActorId();
   const r = await prisma.requestTemplate.update({ where: { id }, data: { ...payload, updatedById: actor } });
   revalidatePath('/requests');

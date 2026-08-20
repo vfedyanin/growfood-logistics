@@ -68,3 +68,61 @@ export async function activeVehicleTypesForDirection(
   }
   return Array.from(byCode.entries()).map(([code, capacity]) => ({ code, capacity }));
 }
+
+// Стоимость рейса по тарифу перевозчика — нетто, как хранится в базе. Тем же
+// ключом (направление ЛИБО пара точек) и той же выборкой действующей версии,
+// что и подбор машин выше: иначе цена и вместимость считались бы по разным
+// тарифам. Раньше стоимость автопланом не проставлялась вовсе, а ручной расчёт
+// (tryAutoCalcEconomics) искал тариф только по directionId и не находил те 107
+// из 121, что ключуются парой точек.
+//
+// Приоритет как в ручном расчёте: цена за рейс по типу ТС → за паллету → за км.
+export async function activeCarrierTripCost(
+  direction: { id: string; originId: string | null; destinationId: string | null; distanceKm: number | null },
+  carrierId: string,
+  vehicleTypeCode: string,
+  pallets: number,
+  on: Date,
+): Promise<number | null> {
+  const pair =
+    direction.originId && direction.destinationId
+      ? [{ originLocationId: direction.originId, destinationLocationId: direction.destinationId }]
+      : [];
+
+  const tariffs = await prisma.tariff.findMany({
+    where: {
+      carrierContract: { carrierId },
+      validFrom: { lte: on },
+      OR: [{ validTo: null }, { validTo: { gte: on } }],
+      AND: [{ OR: [{ directionId: direction.id }, ...pair] }],
+    },
+    select: {
+      vehicleTypeCode: true, validFrom: true, directionId: true,
+      originLocationId: true, destinationLocationId: true,
+      pricePerTrip: true, pricePerPallet: true, pricePerKm: true,
+    },
+  });
+
+  const keyOf = (t: (typeof tariffs)[number]) =>
+    t.directionId ?? `${t.originLocationId ?? ''}_${t.destinationLocationId ?? ''}`;
+  const latestByKey = new Map<string, number>();
+  for (const t of tariffs) {
+    const k = keyOf(t);
+    const ts = t.validFrom.getTime();
+    if (!latestByKey.has(k) || ts > latestByKey.get(k)!) latestByKey.set(k, ts);
+  }
+  const active = tariffs.filter((t) => t.validFrom.getTime() === latestByKey.get(keyOf(t)));
+  const round = (v: number) => Math.round(v * 100) / 100;
+
+  const perTrip = active.find((t) => t.vehicleTypeCode === vehicleTypeCode && t.pricePerTrip != null);
+  if (perTrip) return round(Number(perTrip.pricePerTrip));
+
+  // Тариф за паллету/км может быть задан без типа ТС — тогда годится любой.
+  const perPallet = active.find((t) => t.pricePerPallet != null && (t.vehicleTypeCode === vehicleTypeCode || t.vehicleTypeCode == null));
+  if (perPallet) return round(Number(perPallet.pricePerPallet) * pallets);
+
+  const perKm = active.find((t) => t.pricePerKm != null && (t.vehicleTypeCode === vehicleTypeCode || t.vehicleTypeCode == null));
+  if (perKm && direction.distanceKm) return round(Number(perKm.pricePerKm) * Number(direction.distanceKm));
+
+  return null;
+}

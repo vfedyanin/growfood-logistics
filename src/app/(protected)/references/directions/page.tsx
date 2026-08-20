@@ -6,8 +6,8 @@ import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
-import { getDirections, createDirection, updateDirection, deleteDirection } from '@/lib/actions/references';
-import { CarrierSelect } from '@/components/selects/EntitySelects';
+import { getDirections, createDirection, updateDirection, deleteDirection, getRouteStops, setRouteStops } from '@/lib/actions/references';
+import { CarrierSelect, LocationSelect } from '@/components/selects/EntitySelects';
 
 export default function DirectionsPage() {
   const { can } = usePermissions();
@@ -16,13 +16,25 @@ export default function DirectionsPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  // Маршрут направления — упорядоченный список locationId. Крепится к
+  // существующему направлению, поэтому редактируется только при editing:
+  // у нового направления ещё нет id, к которому привязать остановки.
+  const [stops, setStops] = useState<string[]>([]);
   const [form] = Form.useForm();
 
   const load = async () => { setLoading(true); try { setData(await getDirections()); } finally { setLoading(false); } };
   useEffect(() => { load(); }, []);
 
-  const onAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ isActive: true }); setOpen(true); };
-  const onEdit = (r: any) => { setEditing(r); form.setFieldsValue(r); setOpen(true); };
+  const onAdd = () => { setEditing(null); setStops([]); form.resetFields(); form.setFieldsValue({ isActive: true }); setOpen(true); };
+  const onEdit = async (r: any) => {
+    setEditing(r); form.setFieldsValue(r); setStops([]); setOpen(true);
+    try { const s = await getRouteStops(r.id); setStops(s.map((x: any) => x.locationId)); } catch { /* маршрут — не критично для открытия карточки */ }
+  };
+  const moveStop = (i: number, dir: -1 | 1) => setStops((s) => {
+    const j = i + dir;
+    if (j < 0 || j >= s.length) return s;
+    const c = [...s]; [c[i], c[j]] = [c[j], c[i]]; return c;
+  });
   const onDelete = async (id: string) => {
     try { await deleteDirection(id); message.success('Удалено'); load(); }
     catch { message.error('Не удалось удалить (направление используется)'); }
@@ -47,6 +59,10 @@ export default function DirectionsPage() {
         });
         return;
       }
+      // Маршрут сохраняем только при редактировании (у нового направления id
+      // появляется в res.direction, но остановки для него заведём при следующем
+      // открытии — так проще и без гонок). Пустые строки-заглушки отбрасываем.
+      if (editing) await setRouteStops(editing.id, stops.filter(Boolean));
       message.success('Сохранено'); setOpen(false); load();
     } catch (e: any) { message.error(e?.message || 'Ошибка сохранения'); }
   };
@@ -118,6 +134,31 @@ export default function DirectionsPage() {
           />
         </Form.Item>
         <Form.Item name="isActive" label="Активно" valuePropName="checked"><Switch /></Form.Item>
+
+        {/* Маршрут направления — каркас для автораспределения. Точки в порядке
+            объезда; автоматика раскладывает плечи дня в этом порядке, а точки без
+            груза пропускает. Доступен только у существующего направления. */}
+        {editing && (
+          <Form.Item
+            label="Маршрут (порядок объезда)"
+            extra="Максимальный маршрут: все точки, куда машина может заезжать, по порядку. В конкретный день система возьмёт только те, куда есть груз. Пусто — автораспределение работает по паре точек, как раньше."
+          >
+            {stops.map((locId, i) => (
+              <Space key={i} style={{ display: 'flex', marginBottom: 6 }} align="baseline">
+                <span style={{ width: 18, color: '#888' }}>{i + 1}.</span>
+                <LocationSelect
+                  value={locId || undefined}
+                  onChange={(v: string) => setStops((s) => s.map((x, j) => (j === i ? v : x)))}
+                  style={{ width: 260 }}
+                />
+                <Button size="small" disabled={i === 0} onClick={() => moveStop(i, -1)}>↑</Button>
+                <Button size="small" disabled={i === stops.length - 1} onClick={() => moveStop(i, 1)}>↓</Button>
+                <Button size="small" danger icon={<DeleteOutlined />} onClick={() => setStops((s) => s.filter((_, j) => j !== i))} />
+              </Space>
+            ))}
+            <Button size="small" icon={<PlusOutlined />} onClick={() => setStops((s) => [...s, ''])}>Добавить точку</Button>
+          </Form.Item>
+        )}
       </EntityForm>
     </>
   );
