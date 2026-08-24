@@ -690,6 +690,11 @@ model TripCargoUnit {
   tempRequiredMax Decimal?         @db.Decimal(4, 1)
   requestId       String?
   notes           String?
+  // Ручной порядок остановок ВНУТРИ рейса. Пусто = порядок не задавали руками,
+  // тогда он считается как раньше: позиция точки в маршруте направления
+  // (RouteStop), иначе время плеча. Заполнено — ПЕРЕОПРЕДЕЛЯЕТ маршрут: логисту
+  // нужно уметь переставить точки в отдельном рейсе, не меняя справочник.
+  stopOrder       Int?
   costSharePct    Decimal?         @db.Decimal(7, 4)
   allocatedCost   Decimal?         @db.Decimal(12, 2)
   createdAt       DateTime         @default(now())

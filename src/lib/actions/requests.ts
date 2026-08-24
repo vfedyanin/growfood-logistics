@@ -482,7 +482,16 @@ export async function getUnassignedCargoLegOptions(filters?: { directionId?: str
   }
   const rows = await prisma.requestCargoLeg.findMany({
     where,
-    include: { pickupLocation: true, dropoffLocation: true, cargo: { include: { request: { include: { customer: true } } } } },
+    include: {
+      pickupLocation: true,
+      dropoffLocation: true,
+      cargo: {
+        include: {
+          consigneeLocation: true,
+          request: { include: { customer: true, deliveryLocation: true } },
+        },
+      },
+    },
     orderBy: { plannedPickup: 'asc' },
   });
   return rows.map((l) => {
@@ -490,9 +499,18 @@ export async function getUnassignedCargoLegOptions(filters?: { directionId?: str
     const datePrefix = p
       ? `${String(p.getDate()).padStart(2, '0')}.${String(p.getMonth() + 1).padStart(2, '0')} · `
       : '';
+    // Конечная точка заявки, а не только точки самого плеча: у заборного или
+    // перевалочного плеча в подписи стоит «Йуми→РЦ МСК», и по ней невозможно
+    // понять, что собираешь — Казань, Елабугу или что-то ещё. Источник как в
+    // остальной системе: точка грузополучателя, иначе точка доставки заявки.
+    const finalName = l.cargo.consigneeLocation?.name || l.cargo.request.deliveryLocation?.name || null;
+    const legPart = `${l.pickupLocation?.name || '—'}→${l.dropoffLocation?.name || '—'}`;
+    // Показываем «в итоге» только если она отличается от выгрузки плеча —
+    // на прямом плече приписка была бы повтором.
+    const finalPart = finalName && finalName !== l.dropoffLocation?.name ? ` ⇒ ${finalName}` : '';
     return {
       value: l.id,
-      label: `${datePrefix}${l.cargo.request.requestNumber} · ${l.cargo.request.customer?.name || ''} · ${l.pickupLocation?.name || '—'}→${l.dropoffLocation?.name || '—'} · ${l.cargo.pallets ?? '—'}пал`,
+      label: `${datePrefix}${l.cargo.request.requestNumber} · ${l.cargo.request.customer?.name || ''} · ${legPart}${finalPart} · ${l.cargo.pallets ?? '—'}пал`,
     };
   });
 }

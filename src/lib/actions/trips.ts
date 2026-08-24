@@ -127,7 +127,12 @@ export async function createTrip(input: any) {
   });
   await tryAutoCalcEconomics(trip.id);
   revalidatePath('/operations/trips');
-  return trip;
+  // serialize обязателен: у Trip три Decimal-поля (plannedWeightKg,
+  // actualWeightKg, actualCost), а Decimal через границу серверного действия не
+  // проходит и роняет рендер обезличенной ошибкой Server Components. Пока эти
+  // поля пустые, всё работало случайно — заполненный вес или стоимость при
+  // создании ломали бы сохранение.
+  return serialize(trip);
 }
 
 export async function updateTrip(id: string, input: any) {
@@ -149,7 +154,10 @@ export async function updateTrip(id: string, input: any) {
   await recalcAllocation(id);
   await tryAutoCalcEconomics(id);
   revalidatePath('/operations/trips');
-  return prisma.trip.findUnique({ where: { id } });
+  // serialize по той же причине, что и в createTrip, и здесь мина опаснее:
+  // tryAutoCalcEconomics выше как раз ЗАПОЛНЯЕТ actualCost, поэтому Decimal в
+  // ответе почти всегда не пустой.
+  return serialize(await prisma.trip.findUnique({ where: { id } }));
 }
 
 export async function deleteTrip(id: string) {
@@ -341,6 +349,31 @@ export async function removeTripCargoUnit(id: string, tripId: string) {
   await prisma.tripCargoUnit.delete({ where: { id } });
   await recalcAllocation(tripId);
   revalidatePath('/operations/trips');
+}
+
+/**
+ * Ручной порядок остановок внутри рейса: список id грузовых единиц в нужном
+ * порядке. Пишем stopOrder = позиция в списке (с 1).
+ *
+ * Зачем вообще: порядок остановок иначе считается по времени плеча, а логисту
+ * бывает нужно переставить точки в КОНКРЕТНОМ рейсе, не меняя справочник
+ * направлений. Заполненный stopOrder переопределяет и время, и маршрут.
+ */
+export async function setTripCargoOrder(tripId: string, orderedUnitIds: string[]) {
+  await requirePermission('cargo.write');
+  const actor = await getActorId();
+  // Обновляем одной транзакцией: при частичной записи порядок остался бы
+  // перемешанным между старыми и новыми значениями.
+  await prisma.$transaction(
+    orderedUnitIds.map((id, i) =>
+      prisma.tripCargoUnit.update({
+        where: { id },
+        data: { stopOrder: i + 1, updatedById: actor },
+      }),
+    ),
+  );
+  revalidatePath('/operations/trips');
+  revalidatePath(`/operations/trips/${tripId}`);
 }
 
 // ============ События качества ============

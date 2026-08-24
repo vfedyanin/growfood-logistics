@@ -314,20 +314,31 @@ export default function TripsPage() {
     const v = await form.validateFields();
     const { routeStops = [], ...header } = v;
     const attachCargoIds = (routeStops as any[]).map((s: any) => s.cargoId).filter(Boolean);
+    // Форму могли открыть со страницы «Груз» (?newWithCargo/?newWithCargos) —
+    // тогда после создания возвращаем оператора туда же: он распределяет пачкой,
+    // и уводить его в список рейсов значит сбивать рабочий контекст.
+    const fromCargo = !!(searchParams.get('newWithCargo') || searchParams.get('newWithCargos'));
     setSubmitting(true);
     try {
       let tripId = editing?.id;
+      let tripNumber: string | undefined;
       if (editing) {
         await updateTrip(editing.id, header);
         for (const rid of removeIds) await removeTripCargoUnit(rid, editing.id);
       } else {
         const trip = await createTrip(header);
         tripId = (trip as any)?.id;
+        tripNumber = (trip as any)?.tripNumber;
       }
       for (const aid of attachCargoIds) if (tripId) await addCargoLegToTrip(aid, tripId);
-      message.success('Сохранено'); setOpen(false);
+      // Номер в уведомлении: при возврате на «Груз» списка рейсов не видно,
+      // и без номера непонятно, что именно создалось.
+      message.success(tripNumber ? `Рейс ${tripNumber} создан` : 'Сохранено');
+      setOpen(false);
       const returnId = searchParams.get('edit');
-      if (returnId && editing) { router.push(`/operations/trips/${returnId}`); } else { load(); }
+      if (returnId && editing) router.push(`/operations/trips/${returnId}`);
+      else if (fromCargo && !editing) router.push('/operations/cargo');
+      else load();
     } catch (e: any) { message.error(e?.message || 'Ошибка сохранения'); }
     finally { setSubmitting(false); }
   };
@@ -496,6 +507,17 @@ export default function TripsPage() {
               <HolderOutlined style={{ color: '#ccc', justifySelf: 'center' }} />
               <span style={{ textDecoration: removed ? 'line-through' : 'none', fontSize: 13 }}>
                 {c.customer?.name || '—'} · {c.pallets ?? '—'} пал
+                {/* Конечная точка и номер заявки: без них по строке не понять,
+                    что за груз и куда он едет — видно только клиента. */}
+                {(() => {
+                  const final = c.requestCargoLeg?.cargo?.consigneeLocation?.name
+                    || c.request?.deliveryLocation?.name
+                    || c.requestCargoLeg?.dropoffLocation?.name;
+                  return final ? <span style={{ color: '#555' }}> · ⇒ {final}</span> : null;
+                })()}
+                {c.request?.requestNumber && (
+                  <span style={{ color: '#999', fontSize: 12 }}> · {c.request.requestNumber}</span>
+                )}
                 {c.requestId && <Tag color="purple" style={{ marginLeft: 6, fontSize: 11 }}>из заявки</Tag>}
               </span>
               <span style={{ color: '#999', fontSize: 12 }}>—</span>
