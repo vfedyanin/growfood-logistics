@@ -67,11 +67,16 @@ export async function getPlanningData(weekStartISO: string) {
   // Заборное плечо отсекаем по двум признакам:
   //  (а) у направления не заданы origin/destination — псевдо-направления MSK-MSK
   //      «Москва-Москва» и SPB-SPB;
-  //  (б) плечо приходит на ХАБ КОНСОЛИДАЦИИ и после него в шаблоне есть ещё плечи,
-  //      то есть груз на хабе перегружают, а не сдают. Так устроены CHEF-MSK
-  //      (ШефМаркет → РЦ МСК), STUDIA-MSK, ELEM-MSK: у них origin/destination
-  //      заполнены, и признака (а) недостаточно — «ШефМаркет - КД НН» попадал
-  //      в группу CHEF-MSK вместо MSK-NN.
+  //  (б) плечо приходит на ХАБ КОНСОЛИДАЦИИ, после него есть ещё плечи, И
+  //      отправление НЕ хаб — то есть это внутригородской ЗАБОР на хаб, а не
+  //      межгородская магистраль. Так устроены CHEF-MSK (ШефМаркет → РЦ МСК),
+  //      STUDIA-MSK, ELEM-MSK: origin/destination заполнены, признака (а) мало,
+  //      и «ШефМаркет - КД НН» иначе попадал бы в группу CHEF-MSK вместо MSK-NN.
+  //      Условие «origin не хаб» обязательно: магистраль хаб→хаб (РЦ СПб → РЦ МСК,
+  //      SPB-MSK) тоже приходит на московский хаб, но это НАСТОЯЩАЯ магистраль
+  //      со своим рейсом — её оставляем, иначе весь питерский перегон Шаверно
+  //      пропадал бы из планирования, а московское плечо вставало бы на день
+  //      забора в Питере вместо дня выезда из МСК.
   //      Условие «есть плечи после» обязательно: для «ШефМаркет - РЦ МСК» или
   //      «ВкусМилл - РЦ СПБ» хаб и есть конечная точка, там это магистраль.
   //
@@ -99,7 +104,11 @@ export async function getPlanningData(weekStartISO: string) {
     for (let i = 0; i < legs.length; i++) {
       const d = legs[i].directionId ? dirById.get(legs[i].directionId) : undefined;
       if (!d || !d.originId || !d.destinationId) continue;                      // (а)
-      if (i !== legs.length - 1 && hubIds.has(legs[i].dropoffLocationId)) continue; // (б)
+      if (
+        i !== legs.length - 1 &&
+        hubIds.has(legs[i].dropoffLocationId) &&
+        !hubIds.has(legs[i].pickupLocationId)
+      ) continue; // (б) — только внутригородской забор на хаб, не магистраль хаб→хаб
       magistral = d;
       magistralIdx = i;
       break;
