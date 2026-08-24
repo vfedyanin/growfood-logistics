@@ -66,7 +66,7 @@ const menuItems: MenuItem[] = [
     getItem('Направления', '/references/directions', <NodeIndexOutlined />),
     getItem('Договоры (клиенты)', '/references/customer-contracts', <FileTextOutlined />),
     getItem('Договоры (перевозчики)', '/references/carrier-contracts', <FileTextOutlined />),
-    getItem('Тарифы', '/references/tariffs', <CreditCardOutlined />),
+    getItem('Тариф (НЕ РАБОТАЕТ)', '/references/tariffs', <CreditCardOutlined />),
     getItem('Рыночные цены', '/references/market-prices', <DollarOutlined />),
   ]),
   getItem('Финансы', '/finance', <DollarOutlined />, [

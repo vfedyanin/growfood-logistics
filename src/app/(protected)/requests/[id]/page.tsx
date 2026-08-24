@@ -169,6 +169,11 @@ export default function RequestDetailPage() {
       legs: (c.legs || []).filter((l: any) => !l.tripCargoUnitId).map((l: any) => ({
         pickupLocationId: l.pickupLocationId,
         dropoffLocationId: l.dropoffLocationId,
+        // Направление обязательно переносить: без него Select открывался пустым,
+        // форма отдавала directionId undefined, и правка любого поля груза
+        // (например количества паллет) падала на проверке обязательного
+        // направления — в проде обезличенной ошибкой Server Components.
+        directionId: l.directionId ?? undefined,
         plannedPickupDate: l.plannedPickup ? dayjs(l.plannedPickup) : null,
         plannedPickupFrom: l.plannedPickup ? dayjs(l.plannedPickup) : null,
         plannedPickupTo: l.plannedPickupTo ? dayjs(l.plannedPickupTo, 'HH:mm') : null,
@@ -198,6 +203,15 @@ export default function RequestDetailPage() {
 
   const submitCargo = async () => {
     const v = await cargoForm.validateFields();
+    // Направление проверяем ЗДЕСЬ, до отправки: серверная проверка бросает
+    // исключение, а prod-сборка Next вырезает его текст и пользователь видит
+    // обезличенное «An error occurred in the Server Components render».
+    // Клиентом можем назвать конкретное плечо.
+    const missing = (v.legs || []).findIndex((l: any) => !l?.directionId);
+    if (missing >= 0) {
+      message.error(`Плечо ${missing + 1}: не выбрано направление. Без него заявка не попадёт в распределение.`);
+      return;
+    }
     const payload = { ...v, legs: serializeLegs(v.legs) };
     try {
       if (editingCargo) await updateRequestCargo(editingCargo.id, payload);

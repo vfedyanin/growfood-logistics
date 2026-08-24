@@ -21,12 +21,17 @@ export const authConfig = {
       if (user) {
         token.roles = (user as any).roles;
         token.permissions = (user as any).permissions;
+        // ФИО кладём в токен явно: полагаться на дефолт next-auth ненадёжно —
+        // в шапке имя пропадало и показывалось «Пользователь». authorize()
+        // отдаёт name = fullName.
+        token.name = (user as any).name ?? token.name;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.sub!;
+        session.user.name = (token.name as string) ?? session.user.name;
         (session.user as any).roles = token.roles;
         (session.user as any).permissions = token.permissions;
       }
