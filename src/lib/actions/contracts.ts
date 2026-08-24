@@ -535,12 +535,25 @@ export async function upsertDirectionSchedule(
   const from = validFrom ? new Date(validFrom) : new Date();
   from.setHours(0, 0, 0, 0);
 
-  // Дата новой версии не позже текущей — правим её на месте, а не плодим версию
-  // с той же датой начала (иначе выбор «действующей на неделю» станет неоднозначным)
+  // Дата новой версии не позже текущей — правим версию на месте, а не плодим
+  // вторую с той же датой (иначе выбор «действующей на неделю» станет неоднозначным).
+  // При этом дату начала МОЖНО сдвинуть на указанную (в т.ч. назад,
+  // ретроспективно — чтобы прошлые недели тоже шли по этому графику), но не
+  // раньше конца предыдущей закрытой версии, иначе периоды пересекутся.
   if (from <= current.validFrom) {
+    const prev = await prisma.directionSchedule.findFirst({
+      where: { ...keyWhere, validTo: { not: null } },
+      orderBy: { validFrom: 'desc' },
+    });
+    let newFrom = from;
+    if (prev?.validTo && from <= prev.validTo) {
+      newFrom = new Date(prev.validTo);
+      newFrom.setDate(newFrom.getDate() + 1);
+      newFrom.setHours(0, 0, 0, 0);
+    }
     await prisma.directionSchedule.update({
       where: { id: current.id },
-      data: { ...days, ...templateData },
+      data: { ...days, ...templateData, validFrom: newFrom },
     });
     revalidatePath(`/references/customer-contracts/${contractId}`);
     revalidatePath('/operations/planning');
