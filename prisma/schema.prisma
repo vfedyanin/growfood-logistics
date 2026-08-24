@@ -499,6 +499,18 @@ model Direction {
   // Режим набивки. Пусто = направление не настроено, автопланирование его не берёт.
   splitMode SplitMode?
   //
+  // ЧЕЙ РЕЙС ЗАБИРАЕТ ГРУЗ ЭТОГО НАПРАВЛЕНИЯ С ПРОИЗВОДСТВА.
+  // Пусто = свой собственный рейс. Заполнено = заборное плечо (производство →
+  // хаб) едет на машине ДРУГОГО направления, а из хаба груз уходит уже своим
+  // рейсом. Стоимость забора при этом внутри тарифа того направления, отдельной
+  // ставки нет — поэтому отдельное направление на забор не заводится.
+  //
+  // Пример: Трансхолод забирает с Йуми всё, что там лежит. Настройка «Казань →
+  // забор везёт MSK-NN-5KA» кладёт казанский забор на машину Пятёрочки, а
+  // «Воронеж → MSK-NN» — воронежский на машину Нижнего. Правило живёт в данных,
+  // а не в коде: поменялись объёмы — переставили в справочнике.
+  pickupViaDirectionId String?
+  //
   // Типа ТС и вместимости здесь НЕТ намеренно. Список типов, которые перебирает
   // алгоритм, берётся из тарифов договора перевозчика на это направление: если у
   // перевозчика в тарифах только восьмипаллетки, фуры взяться неоткуда.
@@ -507,6 +519,9 @@ model Direction {
   origin      Location? @relation("DirectionOrigin", fields: [originId], references: [id])
   destination Location? @relation("DirectionDestination", fields: [destinationId], references: [id])
   carrier     Carrier?  @relation(fields: [carrierId], references: [id])
+  // Self-relation: чей рейс забирает груз с производства (см. поле выше).
+  pickupViaDirection  Direction?  @relation("DirectionPickupVia", fields: [pickupViaDirectionId], references: [id])
+  pickupForDirections Direction[] @relation("DirectionPickupVia")
   trips         Trip[]
   tariffs       Tariff[]
   marketPrices  MarketPrice[]
