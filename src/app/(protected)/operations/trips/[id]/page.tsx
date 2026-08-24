@@ -540,7 +540,19 @@ export default function TripDetailPage() {
       {/* Основные данные */}
       <Descriptions bordered size="small" column={2} style={{ marginBottom: 24 }}>
         <Descriptions.Item label="Тип">
-          {tripTypeOptions.find((o) => o.value === trip.tripType)?.label}
+          {/* MONO/MIX — следствие длины перечисления вертикалей, отдельно не
+              хранится. У рейсов, созданных до появления перечисления, список
+              пуст — для них показываем прежний тип. */}
+          {trip.verticalCodes?.length ? (
+            <Space size={4} wrap>
+              <Tag color={trip.verticalCodes.length > 1 ? 'orange' : 'blue'}>
+                {trip.verticalCodes.length > 1 ? 'MIX' : 'MONO'}
+              </Tag>
+              <span>{trip.verticalCodes.join(', ')}</span>
+            </Space>
+          ) : (
+            tripTypeOptions.find((o) => o.value === trip.tripType)?.label
+          )}
         </Descriptions.Item>
         <Descriptions.Item label="Перевозчик">{trip.carrier?.name || '—'}</Descriptions.Item>
         <Descriptions.Item label="ТС">{trip.vehicle?.plateNumber || '—'}</Descriptions.Item>
