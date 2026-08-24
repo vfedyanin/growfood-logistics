@@ -15,6 +15,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getTrip, changeTripStatus, recordDeparture, recordArrival,
   addTripCargoUnit, removeTripCargoUnit, addQualityEvent, calculateTripEconomics, completeTripQuick,
+  setTripCargoOrder,
 } from '@/lib/actions/trips';
 import { addCargoLegToTrip, getUnassignedCargoLegOptions } from '@/lib/actions/requests';
 import { getRouteStops } from '@/lib/actions/references';
@@ -73,8 +74,11 @@ const effectiveVehicleType = (t: any) => t?.vehicle?.vehicleType?.name || t?.veh
 interface Stop {
   id: string;
   loc: any;
+  /** Ручной порядок: минимальный stopOrder среди грузов этой точки.
+   *  Infinity — порядок для точки руками не задавали. Старше маршрута. */
+  orderKey: number;
   pos: number;     // позиция точки в маршруте направления; вне маршрута — в конец
-  sortKey: number; // время (вторичный ключ и полный fallback, если маршрута нет)
+  sortKey: number; // время (последний ключ и полный fallback)
   load: any[];   // cargoUnits, у которых pickupLocation = эта точка
   unload: any[]; // cargoUnits, у которых dropoffLocation = эта точка
 }
@@ -92,20 +96,30 @@ function buildStops(units: any[], orderMap?: Map<string, number>): Stop[] {
     if (!leg) return;
     const pt = leg.plannedPickup ? +new Date(leg.plannedPickup) : (leg.legOrder ?? 0) * 1e9;
     const dt2 = leg.plannedDropoff ? +new Date(leg.plannedDropoff) : pt + 1;
+    // Ручной порядок груза, если его задавали перетаскиванием.
+    const ord = u.stopOrder != null ? Number(u.stopOrder) : Infinity;
     if (leg.pickupLocationId && leg.pickupLocation) {
-      if (!map.has(leg.pickupLocationId)) map.set(leg.pickupLocationId, { id: leg.pickupLocationId, loc: leg.pickupLocation, pos: posOf(leg.pickupLocationId), sortKey: pt, load: [], unload: [] });
+      if (!map.has(leg.pickupLocationId)) map.set(leg.pickupLocationId, { id: leg.pickupLocationId, loc: leg.pickupLocation, orderKey: ord, pos: posOf(leg.pickupLocationId), sortKey: pt, load: [], unload: [] });
       const s = map.get(leg.pickupLocationId)!;
       if (pt < s.sortKey) s.sortKey = pt;
+      if (ord < s.orderKey) s.orderKey = ord;
       s.load.push(u);
     }
     if (leg.dropoffLocationId && leg.dropoffLocation) {
-      if (!map.has(leg.dropoffLocationId)) map.set(leg.dropoffLocationId, { id: leg.dropoffLocationId, loc: leg.dropoffLocation, pos: posOf(leg.dropoffLocationId), sortKey: dt2, load: [], unload: [] });
+      if (!map.has(leg.dropoffLocationId)) map.set(leg.dropoffLocationId, { id: leg.dropoffLocationId, loc: leg.dropoffLocation, orderKey: ord, pos: posOf(leg.dropoffLocationId), sortKey: dt2, load: [], unload: [] });
       const s = map.get(leg.dropoffLocationId)!;
       if (dt2 < s.sortKey) s.sortKey = dt2;
+      if (ord < s.orderKey) s.orderKey = ord;
       s.unload.push(u);
     }
   });
-  return Array.from(map.values()).sort((a, b) => (a.pos - b.pos) || (a.sortKey - b.sortKey));
+  // Приоритет: ручной порядок (stopOrder) → позиция в маршруте направления →
+  // время плеча. Ручной старше маршрута намеренно: логисту нужно уметь
+  // переставить точки в конкретном рейсе, не меняя справочник. Пока порядок
+  // руками не задавали, orderKey у всех Infinity и работает маршрут, как раньше.
+  return Array.from(map.values()).sort(
+    (a, b) => (a.orderKey - b.orderKey) || (a.pos - b.pos) || (a.sortKey - b.sortKey),
+  );
 }
 
 // Груз, который ЕДЕТ В МАШИНЕ после точки с индексом fromIdx (т.е. погружен ≤ fromIdx, выгружается > fromIdx)
@@ -279,7 +293,34 @@ function TransitRow({ units }: { units: any[] }) {
   );
 }
 
-function TripStopsView({ cargoUnits, canRemove, onRemove, orderMap }: { cargoUnits: any[]; canRemove: boolean; onRemove: (id: string) => void; orderMap?: Map<string, number> }) {
+/** Переставить точку на одну позицию. Возвращает новый порядок точек. */
+function moveStop(stops: Stop[], idx: number, dir: -1 | 1): Stop[] {
+  const j = idx + dir;
+  if (j < 0 || j >= stops.length) return stops;
+  const c = [...stops];
+  [c[idx], c[j]] = [c[j], c[idx]];
+  return c;
+}
+
+/**
+ * Порядок точек → плоский список id грузов для сохранения в stopOrder.
+ *
+ * Груз касается двух точек, поэтому он получает номер ПЕРВОЙ точки, где
+ * встречается: так точка сортируется по минимальному номеру своих грузов
+ * (см. buildStops) и порядок из интерфейса воспроизводится один в один.
+ */
+function unitIdsForOrder(stops: Stop[]): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const s of stops) {
+    for (const u of [...s.load, ...s.unload]) {
+      if (u?.id && !seen.has(u.id)) { seen.add(u.id); ids.push(u.id); }
+    }
+  }
+  return ids;
+}
+
+function TripStopsView({ cargoUnits, canRemove, onRemove, onReorder, orderMap }: { cargoUnits: any[]; canRemove: boolean; onRemove: (id: string) => void; onReorder?: (orderedUnitIds: string[]) => void; orderMap?: Map<string, number> }) {
   const withLeg = cargoUnits.filter(u => u.requestCargoLeg);
   const noLeg = cargoUnits.filter(u => !u.requestCargoLeg);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -311,14 +352,34 @@ function TripStopsView({ cargoUnits, canRemove, onRemove, orderMap }: { cargoUni
     <div>
       {stops.map((stop, idx) => (
         <React.Fragment key={stop.id}>
-          <StopCard
-            stop={stop}
-            isFirst={idx === 0}
-            isLast={idx === stops.length - 1}
-            finalDestMap={finalDestMap}
-            canRemove={canRemove}
-            onRemove={onRemove}
-          />
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+            {/* Ручной порядок объезда. Порядок задаётся по ГРУЗАМ (stopOrder
+                живёт на грузовой единице), а точка встаёт по минимальному
+                номеру своих грузов — груз касается сразу двух точек, погрузки
+                и выгрузки, поэтому «номер точки» отдельно хранить нечем. */}
+            {onReorder && stops.length > 1 && (
+              <Space direction="vertical" size={2} style={{ paddingTop: 12 }}>
+                <Button
+                  size="small" disabled={idx === 0} title="Раньше"
+                  onClick={() => onReorder(unitIdsForOrder(moveStop(stops, idx, -1)))}
+                >↑</Button>
+                <Button
+                  size="small" disabled={idx === stops.length - 1} title="Позже"
+                  onClick={() => onReorder(unitIdsForOrder(moveStop(stops, idx, 1)))}
+                >↓</Button>
+              </Space>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <StopCard
+                stop={stop}
+                isFirst={idx === 0}
+                isLast={idx === stops.length - 1}
+                finalDestMap={finalDestMap}
+                canRemove={canRemove}
+                onRemove={onRemove}
+              />
+            </div>
+          </div>
           {idx < stops.length - 1 && (
             <TransitRow units={transitAfter(stops, idx)} />
           )}
@@ -469,6 +530,12 @@ export default function TripDetailPage() {
     catch (e: any) { message.error(e?.message || 'Ошибка'); }
   };
 
+  // Ручной порядок объезда: сохраняем stopOrder по грузам и перечитываем рейс.
+  const reorderStops = async (orderedUnitIds: string[]) => {
+    try { await setTripCargoOrder(id, orderedUnitIds); refresh(); }
+    catch (e: any) { message.error(e?.message || 'Не удалось сохранить порядок'); }
+  };
+
   // Привязка из заявки
   const openAttach = () => { attachForm.resetFields(); setAttachOpen(true); };
   const submitAttach = async () => {
@@ -601,6 +668,7 @@ export default function TripDetailPage() {
         canRemove={canCargo}
         onRemove={removeCargo}
         orderMap={orderMap}
+        onReorder={canCargo ? reorderStops : undefined}
       />
 
       {/* События качества */}
