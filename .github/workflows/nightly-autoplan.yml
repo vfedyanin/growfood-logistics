@@ -1,0 +1,53 @@
+name: Nightly autoplan
+
+# Ночное автораспределение плеч по рейсам. Раньше жило на Vercel Cron, но тот на
+# проде не исполнялся (зависит от плана Vercel и от успешного прод-деплоя). Здесь
+# планировщик — GitHub Actions: дёргает тот же прод-эндпоинт /api/autoplan/cron,
+# ни от чего в Vercel не зависит, и результат каждого запуска виден в логах Actions.
+#
+# Эндпоинт сам считает «завтра» по Москве, поэтому по расписанию дата не нужна.
+# Ручной прогон (workflow_dispatch) принимает дату — так догоняют пропущенный день.
+#
+# Секреты репозитория (Settings → Secrets and variables → Actions):
+#   PROD_BASE_URL — базовый URL прода без слэша на конце, напр. https://<домен>
+#   CRON_SECRET   — то же значение, что в переменной CRON_SECRET на проде
+
+on:
+  schedule:
+    - cron: '0 20 * * *'   # 20:00 UTC = 23:00 МСК, до московской полуночи
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Дата YYYY-MM-DD (пусто = завтра по МСК)'
+        required: false
+        default: ''
+
+jobs:
+  autoplan:
+    name: trigger
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger autoplan endpoint
+        env:
+          BASE_URL: ${{ secrets.PROD_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          DATE: ${{ github.event.inputs.date }}
+        run: |
+          if [ -z "$BASE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "Не заданы секреты PROD_BASE_URL и/или CRON_SECRET" >&2
+            exit 1
+          fi
+          URL="$BASE_URL/api/autoplan/cron"
+          if [ -n "$DATE" ]; then URL="$URL?date=$DATE"; fi
+          echo "GET $URL"
+          # maxDuration эндпоинта — 300с, день может дать десятки рейсов
+          code=$(curl -sS --max-time 300 -o resp.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CRON_SECRET" "$URL" || echo "000")
+          echo "HTTP $code"
+          echo "--- ответ ---"
+          cat resp.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "Автораспределение не отработало (HTTP $code)" >&2
+            exit 1
+          fi
