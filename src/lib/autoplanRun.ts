@@ -18,7 +18,7 @@
 //   плечи без направления, направления без перевозчика, направления без режима.
 
 import { prisma } from '@/lib/prisma';
-import { nextTripNumber, tcuFromCargo } from '@/lib/tripFactory';
+import { nextTripNumber, tcuFromCargo, tripVerticalsFrom, tripTypeFromVerticals } from '@/lib/tripFactory';
 import { packLegs, type PackedTruck } from '@/lib/autoplanCore';
 // Отбор действующих тарифов перевозчика — общий модуль: этой же логикой
 // проверяется карточка направления при сохранении.
@@ -165,12 +165,18 @@ export async function applyAutoPlan(dateISO: string, actor: string | null) {
     });
     if (!dir?.originId || !dir?.destinationId) continue; // без точек рейс не создать
 
-    // Вертикаль и стороны берём из первой заявки рейса: у рейса они одни.
-    const first = await prisma.requestCargoLeg.findUnique({
-      where: { id: t.legIds[0] },
+    // Вертикали берём по ВСЕМ плечам рейса, а не с первого: в одну машину
+    // попадают заявки разных вертикалей (на боевых данных LAAS-LTL + PRIEM), и
+    // тип «по первому плечу» вставал наугад — рейс с ласовым грузом помечался
+    // OWN и пропадал у LAAS-менеджера.
+    const legRows = await prisma.requestCargoLeg.findMany({
+      where: { id: { in: t.legIds } },
       select: { cargo: { select: { request: { select: { verticalCode: true } } } } },
     });
-    const verticalCode = first?.cargo.request.verticalCode ?? null;
+    const verticalCodes = tripVerticalsFrom(legRows.map((l) => l.cargo.request.verticalCode));
+    // Единственная вертикаль (MONO) — её же кладём в старое одиночное поле;
+    // при MIX оно теряет смысл и остаётся пустым, перечисление живёт в verticalCodes.
+    const verticalCode = verticalCodes.length === 1 ? verticalCodes[0] : null;
 
     // Стоимость по тарифу перевозчика — сразу при создании, тем же ключом
     // (направление/пара точек), что и подбор машины. Раньше автоплан оставлял
@@ -187,8 +193,9 @@ export async function applyAutoPlan(dateISO: string, actor: string | null) {
     const trip = await prisma.trip.create({
       data: {
         tripNumber: await nextTripNumber(),
-        tripType: verticalCode === 'LAAS' ? 'LAAS' : 'OWN',
+        tripType: tripTypeFromVerticals(verticalCodes),
         verticalCode,
+        verticalCodes,
         directionId: t.directionId,
         originId: dir.originId,
         destinationId: dir.destinationId,

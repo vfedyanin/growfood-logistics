@@ -86,12 +86,16 @@ export async function getActorId(): Promise<string | null> {
  * LAAS_MANAGER → только LAAS, OWN_DISPATCHER → только OWN,
  * ADMIN / LOGISTICS_MANAGER и прочие → без ограничения.
  */
-export function tripTypeScopeFor(user: SessionUser): { tripType?: 'LAAS' | 'OWN' } {
+export function tripTypeScopeFor(user: SessionUser): { tripType?: { in: ('LAAS' | 'OWN' | 'CONSOLIDATED')[] } } {
   if (user.roles.includes('ADMIN') || user.roles.includes('LOGISTICS_MANAGER')) return {};
   const laas = user.roles.includes('LAAS_MANAGER');
   const own = user.roles.includes('OWN_DISPATCHER');
-  if (laas && !own) return { tripType: 'LAAS' };
-  if (own && !laas) return { tripType: 'OWN' };
+  // CONSOLIDATED (MIX) входит в скоуп ОБЕИХ ролей: в смешанном рейсе едет и свой,
+  // и ласовый груз, поэтому он нужен и LAAS-менеджеру, и диспетчеру OWN. Раньше
+  // скоуп был строгим равенством ('LAAS'), и смешанные рейсы пропадали у обоих —
+  // именно из-за этого LAAS-менеджер не видел рейс с грузом своего клиента.
+  if (laas && !own) return { tripType: { in: ['LAAS', 'CONSOLIDATED'] } };
+  if (own && !laas) return { tripType: { in: ['OWN', 'CONSOLIDATED'] } };
   return {};
 }
 
@@ -99,5 +103,5 @@ export function tripTypeScopeFor(user: SessionUser): { tripType?: 'LAAS' | 'OWN'
 export function canEditTripType(user: SessionUser, tripType: 'OWN' | 'LAAS' | 'CONSOLIDATED'): boolean {
   const scope = tripTypeScopeFor(user);
   if (!scope.tripType) return true;
-  return scope.tripType === tripType;
+  return scope.tripType.in.includes(tripType);
 }

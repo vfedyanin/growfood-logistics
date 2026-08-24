@@ -546,6 +546,12 @@ model Trip {
   id               String     @id @default(cuid())
   tripNumber       String     @unique
   tripType         TripType
+  // Перечисление фактических вертикалей груза рейса: MONO — один элемент,
+  // MIX — несколько. «MONO/MIX» не храним, это следствие длины списка.
+  // tripType выше остаётся свёрткой этого перечисления (см. tripFactory):
+  // существующие рейсы не пересчитывались, поэтому фильтры и права по-прежнему
+  // опираются на tripType, а у старых рейсов verticalCodes пуст.
+  verticalCodes    String[]
   verticalCode     String?
   directionId      String?  @map("routeId")
   originId         String?

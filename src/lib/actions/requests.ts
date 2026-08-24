@@ -8,7 +8,7 @@ import { recomputeRequestFinals, getCustomerVatRate, addVat } from '@/lib/pricin
 import { nextRequestNumber } from '@/lib/numbering';
 // Номер рейса и сборка грузовой единицы — в @/lib/tripFactory: их же использует
 // автопланирование, вторая реализация нумерации подралась бы на уникальном индексе.
-import { nextTripNumber, tcuFromCargo } from '@/lib/tripFactory';
+import { nextTripNumber, tcuFromCargo, tripVerticalsFrom, tripTypeFromVerticals, recalcTripVerticals } from '@/lib/tripFactory';
 
 type RequestStatus = 'NEW' | 'CONFIRMED' | 'IN_PLANNING' | 'IN_TRANSIT' | 'DELIVERED' | 'CANCELLED';
 
@@ -328,6 +328,10 @@ export async function addCargoLegToTrip(legId: string, tripId: string) {
     if (leg.plannedDropoff && (!trip?.plannedArrival || leg.plannedDropoff > trip.plannedArrival)) updates.plannedArrival = leg.plannedDropoff;
     if (Object.keys(updates).length) await prisma.trip.update({ where: { id: tripId }, data: updates });
   }
+  // Состав рейса изменился — пересчитываем перечисление вертикалей и тип.
+  // Без этого ручная привязка ласового плеча к своему рейсу оставляла его OWN,
+  // и рейс пропадал у LAAS-менеджера — та же дыра, что была в автопланировании.
+  await recalcTripVerticals(tripId);
   revalidatePath('/requests'); revalidatePath('/operations/trips'); revalidatePath('/operations/cargo');
 }
 
@@ -346,11 +350,15 @@ export async function createTripFromRequest(requestId: string) {
   const originId = req.pickupLocationId || legs[0].leg.pickupLocationId;
   const destinationId = req.deliveryLocationId || legs[legs.length - 1].leg.dropoffLocationId;
   if (!originId || !destinationId) throw new Error('Не удалось определить точки маршрута (укажите забор/выгрузку в заявке или плечах)');
-  const tripType = req.verticalCode === 'LAAS' ? 'LAAS' : 'OWN';
+  // Рейс из одной заявки — вертикаль одна (MONO). Через общий помощник, а не
+  // сравнением с 'LAAS': такого кода в справочнике нет (есть LAAS-LTL/LAAS-B2C),
+  // и ласовые рейсы помечались OWN.
+  const verticalCodes = tripVerticalsFrom([req.verticalCode]);
+  const tripType = tripTypeFromVerticals(verticalCodes);
   const tripNumber = await nextTripNumber();
   const trip = await prisma.trip.create({
     data: {
-      tripNumber, tripType, verticalCode: req.verticalCode || null, originId, destinationId,
+      tripNumber, tripType, verticalCode: req.verticalCode || null, verticalCodes, originId, destinationId,
       shipperId: req.shipperId || null, consigneeId: req.consigneeId || null, payerId: req.payerId || null,
       status: 'DRAFT', createdById: actor, updatedById: actor,
     },
@@ -377,11 +385,12 @@ export async function createTripFromLeg(legId: string) {
   const originId = leg.pickupLocationId || req.pickupLocationId;
   const destinationId = leg.dropoffLocationId || req.deliveryLocationId;
   if (!originId || !destinationId) throw new Error('Не удалось определить точки маршрута (укажите забор/выгрузку в плече)');
-  const tripType = req.verticalCode === 'LAAS' ? 'LAAS' : 'OWN';
+  const verticalCodes = tripVerticalsFrom([req.verticalCode]);
+  const tripType = tripTypeFromVerticals(verticalCodes);
   const tripNumber = await nextTripNumber();
   const trip = await prisma.trip.create({
     data: {
-      tripNumber, tripType, verticalCode: req.verticalCode || null, originId, destinationId,
+      tripNumber, tripType, verticalCode: req.verticalCode || null, verticalCodes, originId, destinationId,
       plannedDeparture: leg.plannedPickup || null, plannedArrival: leg.plannedDropoff || null,
       shipperId: req.shipperId || null, consigneeId: req.consigneeId || null, payerId: req.payerId || null,
       status: 'DRAFT', createdById: actor, updatedById: actor,
@@ -524,8 +533,13 @@ export async function unassignCargoLeg(legId: string) {
   const l = await prisma.requestCargoLeg.findUnique({ where: { id: legId } });
   if (!l?.tripCargoUnitId) return;
   const tcuId = l.tripCargoUnitId;
+  // Рейс запоминаем ДО удаления единицы: после удаления связь плеча с рейсом
+  // потеряна и пересчитывать будет нечего.
+  const tcu = await prisma.tripCargoUnit.findUnique({ where: { id: tcuId }, select: { tripId: true } });
   await prisma.requestCargoLeg.update({ where: { id: legId }, data: { tripCargoUnitId: null, updatedById: actor } });
   await prisma.tripCargoUnit.delete({ where: { id: tcuId } });
+  // Состав рейса изменился — пересчитываем перечисление и тип.
+  if (tcu?.tripId) await recalcTripVerticals(tcu.tripId);
   revalidatePath('/operations/cargo'); revalidatePath('/operations/trips');
 }
 
