@@ -115,7 +115,7 @@ export default function TariffsPage() {
 
   return (
     <>
-      <DataTable title="Тарифы" data={data} columns={columns} loading={loading} scrollX={1100}
+      <DataTable title="Тариф (НЕ РАБОТАЕТ)" data={data} columns={columns} loading={loading} scrollX={1100}
         toolbar={<Space><ImportExportButtons resource="tariffs" onChanged={load} canWrite={w} />{w && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Добавить</Button>}</Space>} />
       <EntityForm open={open} title={editing ? 'Редактировать тариф' : 'Новый тариф'} form={form}
         onSubmit={onSubmit} onCancel={() => setOpen(false)} isEditing={!!editing}>
