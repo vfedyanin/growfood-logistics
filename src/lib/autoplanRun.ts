@@ -31,6 +31,8 @@ export type SkipReason =
   | 'NO_TARIFF';     // у перевозчика нет действующего тарифа на это направление
 
 export type PlannedTrip = PackedTruck & {
+  /** Сколько из плеч рейса — заборные (производство → хаб, входят в тариф). */
+  pickupLegs: number;
   directionId: string;
   directionCode: string;
   carrierId: string;
@@ -57,7 +59,8 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
   const legs = await prisma.requestCargoLeg.findMany({
     where: { plannedPickup: { gte: day, lt: dayEnd }, tripCargoUnitId: null },
     select: {
-      id: true, directionId: true, plannedPickup: true, plannedDropoff: true,
+      id: true, directionId: true, legOrder: true, plannedPickup: true, plannedDropoff: true,
+      pickupLocationId: true, dropoffLocationId: true, requestCargoId: true,
       cargo: { select: { pallets: true } },
     },
   });
@@ -70,24 +73,105 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
   const noDir = legs.filter((l) => !l.directionId);
   if (noDir.length) add('NO_DIRECTION', null, noDir.map((l) => ({ pallets: l.cargo.pallets ?? 0 })));
 
+  // Все направления разом: нужны настройки (перевозчик, режим) и правило
+  // «чей рейс забирает груз с производства».
+  const allDirs = await prisma.direction.findMany({
+    select: {
+      id: true, code: true, originId: true, destinationId: true,
+      splitMode: true, carrierId: true, pickupViaDirectionId: true,
+      carrier: { select: { name: true } },
+      stops: { select: { locationId: true, position: true } },
+    },
+  });
+  const dirById = new Map(allDirs.map((d) => [d.id, d]));
+  const configured = (id: string | null | undefined) => {
+    const d = id ? dirById.get(id) : undefined;
+    return !!(d && d.carrierId && d.splitMode);
+  };
+
+  // ЗАБОРНОЕ ПЛЕЧО — плечо, у которого своё направление НЕ настроено (внутренние
+  // перевалки вроде MSK-MSK: перевозчика там нет и быть не должно), но в том же
+  // грузе есть следующее плечо с настроенным направлением. Такое плечо не
+  // самостоятельная перевозка: производство → хаб входит в тариф магистрали.
+  //
+  // Куда его класть, задаёт направление магистрали своим pickupViaDirectionId:
+  // «Казань → забор везёт MSK-NN-5KA», «Воронеж → MSK-NN». Пусто — свой рейс.
+  // Правило в данных, поэтому смена объёмов лечится справочником, а не кодом.
+  const nextLegDir = new Map<string, string | null>(); // legId → направление следующего плеча
+  const cargoIds = Array.from(new Set(legs.map((l) => l.requestCargoId)));
+  if (cargoIds.length) {
+    const sameCargoLegs = await prisma.requestCargoLeg.findMany({
+      where: { requestCargoId: { in: cargoIds } },
+      select: { id: true, requestCargoId: true, legOrder: true, directionId: true },
+      orderBy: { legOrder: 'asc' },
+    });
+    const byCargo = new Map<string, typeof sameCargoLegs>();
+    for (const l of sameCargoLegs) {
+      if (!byCargo.has(l.requestCargoId)) byCargo.set(l.requestCargoId, []);
+      byCargo.get(l.requestCargoId)!.push(l);
+    }
+    for (const l of legs) {
+      const chain = byCargo.get(l.requestCargoId) ?? [];
+      const next = chain.find((x) => x.legOrder > (l.legOrder ?? 0));
+      nextLegDir.set(l.id, next?.directionId ?? null);
+    }
+  }
+
+  /** Направление рейса, в который плечо должно попасть, и признак «это забор». */
+  const targetOf = (l: (typeof legs)[number]): { dirId: string | null; isPickup: boolean } => {
+    if (configured(l.directionId)) return { dirId: l.directionId!, isPickup: false };
+    const nextDir = nextLegDir.get(l.id) ?? null;
+    if (!configured(nextDir)) return { dirId: l.directionId ?? null, isPickup: false };
+    const magistral = dirById.get(nextDir!)!;
+    const via = magistral.pickupViaDirectionId;
+    return { dirId: configured(via) ? via! : magistral.id, isPickup: true };
+  };
+
   const byDirection = new Map<string, typeof legs>();
+  const pickupLegIds = new Set<string>();
   for (const l of legs) {
     if (!l.directionId) continue;
-    if (!byDirection.has(l.directionId)) byDirection.set(l.directionId, []);
-    byDirection.get(l.directionId)!.push(l);
+    const t = targetOf(l);
+    if (!t.dirId) continue;
+    if (t.isPickup) pickupLegIds.add(l.id);
+    if (!byDirection.has(t.dirId)) byDirection.set(t.dirId, []);
+    byDirection.get(t.dirId)!.push(l);
   }
 
   const trips: PlannedTrip[] = [];
 
   for (const [directionId, dirLegs] of Array.from(byDirection.entries())) {
-    const dir = await prisma.direction.findUnique({
-      where: { id: directionId },
-      select: {
-        id: true, code: true, originId: true, destinationId: true,
-        splitMode: true, carrierId: true, carrier: { select: { name: true } },
-      },
-    });
+    const dir = dirById.get(directionId);
     if (!dir) continue;
+
+    // ВМЕСТИМОСТЬ СЧИТАЕМ ПО УЧАСТКАМ МАРШРУТА, а не суммой паллет рейса.
+    // Забор выгружается в хабе, и дальше машина едет уже без него: на плечах
+    // Йуми→КД Север и КД Север→Пятёрочка грузы РАЗНЫЕ, они не складываются.
+    // Суммой мы завышали бы загрузку и заказывали лишние машины.
+    // Нагрузка рейса = максимум по участкам маршрута направления.
+    const posOf = new Map(dir.stops.map((s) => [s.locationId, s.position]));
+    const legSpan = (l: (typeof legs)[number]) => {
+      const a = l.pickupLocationId ? posOf.get(l.pickupLocationId) : undefined;
+      const b = l.dropoffLocationId ? posOf.get(l.dropoffLocationId) : undefined;
+      return a != null && b != null && a < b ? { from: a, to: b } : null;
+    };
+    /** Пиковая загрузка набора плеч с учётом того, где груз входит и выходит. */
+    const peakLoad = (chosen: (typeof legs)[number][]) => {
+      const spans = chosen.map((l) => ({ span: legSpan(l), p: l.cargo.pallets ?? 0 }));
+      // Маршрут не заведён или точки вне него — считаем по-старому, суммой:
+      // без порядка точек участков нет, и занижать нагрузку опаснее, чем завышать.
+      if (spans.some((s) => !s.span)) return spans.reduce((s, x) => s + x.p, 0);
+      const edges = Array.from(new Set(spans.flatMap((s) => [s.span!.from, s.span!.to]))).sort((a, b) => a - b);
+      let peak = 0;
+      for (let i = 0; i < edges.length - 1; i++) {
+        const load = spans
+          .filter((s) => s.span!.from <= edges[i] && s.span!.to >= edges[i + 1])
+          .reduce((s, x) => s + x.p, 0);
+        if (load > peak) peak = load;
+      }
+      return peak;
+    };
+
     const items = dirLegs.map((l) => ({ legId: l.id, pallets: l.cargo.pallets ?? 0 }));
 
     if (!dir.carrierId) { add('NO_CARRIER', dir.code, items); continue; }
@@ -96,12 +180,24 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
     const vehicles = await activeVehicleTypesForDirection(dir, dir.carrierId, day);
     if (!vehicles.length) { add('NO_TARIFF', dir.code, items); continue; }
 
+    // Набивка идёт по паллетам (как раньше), а вместимость проверяется по пиковой
+    // загрузке: собранную машину пересчитываем участками и подбираем тип ТС уже
+    // под пик. Без этого забор, который выходит в хабе, тянул бы за собой лишние
+    // машины.
+    const asc = [...vehicles].sort((a, b) => a.capacity - b.capacity);
     for (const truck of packLegs(items, vehicles, dir.splitMode)) {
       const mine = dirLegs.filter((l) => truck.legIds.includes(l.id));
+      const peak = peakLoad(mine);
+      const fit = asc.find((v) => v.capacity >= peak) ?? asc[asc.length - 1];
       const pickups = mine.map((l) => l.plannedPickup).filter(Boolean) as Date[];
       const dropoffs = mine.map((l) => l.plannedDropoff).filter(Boolean) as Date[];
       trips.push({
         ...truck,
+        vehicleTypeCode: fit.code,
+        capacity: fit.capacity,
+        pallets: peak,
+        overload: peak > fit.capacity,
+        pickupLegs: truck.legIds.filter((id) => pickupLegIds.has(id)).length,
         directionId: dir.id,
         directionCode: dir.code,
         carrierId: dir.carrierId,
