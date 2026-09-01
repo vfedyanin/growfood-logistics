@@ -148,7 +148,13 @@ function stopBlock(stop: RouteSheet['stops'][number], index: number): Content[] 
       columns: [
         { width: 16, text: `${index}.`, bold: true },
         { width: '*', text: stop.name, bold: true },
-        { width: 'auto', text: `${kind}   ${hhmm(stop.time)}`, color: GREY, fontSize: 9.5 },
+        {
+          width: 'auto',
+          text: [
+            { text: `${kind}   `, color: GREY, fontSize: 9.5 },
+            { text: hhmm(stop.time), bold: true, fontSize: 13 },
+          ],
+        },
       ],
       margin: [0, 8, 0, 0],
     },
