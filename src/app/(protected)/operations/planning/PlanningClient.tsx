@@ -261,16 +261,23 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
   // едут сборным MSK-MSK, отдельного направления у них нет). Всё, что не попало в
   // именованные блоки, падает в «Магистраль МСК» — это и есть «всё, что выезжает
   // из Москвы», плюс сборка внутри города; так ни одно направление не исчезает.
+  // Точки внутри Москвы без своего кода направления (едут сборным MSK-MSK).
   const MSC_DEST = /Пушкино|Фрязино|Солнечн|Перекрёсток\s+Вешки|Новая\s+Рига|Пятёрочка\s+Рига/i;
+  // Точки внутри Питера без своего кода направления.
+  const SPB_LOCAL_DEST = /Магнит\s+Шушары|Дикси\s+Шушары|Магнит\s+Колпино/i;
   function superKeyOf(g: Group): string {
     const code = g.code;
     if (code) {
+      // Питер-по-Питеру — раньше проверок Магнит/Дикси, иначе SPB-MG/SPB-DX уйдут туда.
+      if (['SPB-MG-KLP', 'SPB-DX-SHR', 'SPB-SPB', 'KLP-SPB'].includes(code)) return 'spblocal';
+      if (['MSK-SPB', 'SPB-MSK'].includes(code)) return 'spb';
+      if (['MSK-VV-DMD', 'MSK-VV-VSH'].includes(code)) return 'vv';
       if (code.startsWith('KZN-')) return 'kzn';
       if (/-MG-/.test(code)) return 'mg';
       if (/-DX-/.test(code)) return 'dx';
-      if (['MSK-SPB', 'SPB-MSK', 'SPB-SPB', 'KLP-SPB'].includes(code)) return 'spb';
-      if (['MSK-PK-VSH', 'MSK-5KA-NOVAYA_RIGA'].includes(code)) return 'msc';
+      if (['MSK-FRESH', 'MSK-PK-VSH', 'MSK-5KA-NOVAYA_RIGA'].includes(code)) return 'msc';
     }
+    if (g.rows.some((r) => SPB_LOCAL_DEST.test(r.destName))) return 'spblocal';
     if (g.rows.some((r) => MSC_DEST.test(r.destName))) return 'msc';
     return 'msk';
   }
@@ -282,7 +289,9 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
     { key: 'spb', title: 'Магистраль СПБ' },
     { key: 'mg', title: 'Магнит' },
     { key: 'dx', title: 'Дикси' },
+    { key: 'vv', title: 'ВкусВилл' },
     { key: 'msc', title: 'Москва' },
+    { key: 'spblocal', title: 'Санкт-Петербург' },
   ];
   const superMap = new Map<string, SuperGroup>(
     SUPER_ORDER.map((s) => [s.key, { key: `super:${s.key}`, title: s.title, groups: [] }]),
