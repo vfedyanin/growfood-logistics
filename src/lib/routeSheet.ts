@@ -46,9 +46,12 @@ export type RouteSheet = {
 
 const clean = (s: string | null | undefined) => (s ?? '').replace(/\s+/g, ' ').trim() || null;
 
+// Расшифровка температурного режима. Числового диапазона по конкретному грузу
+// в базе нет — поля tempRequiredMin/Max пусты во всех строках, заполнен только
+// enum. Поэтому диапазон здесь — фиксированная расшифровка режима, общая для всех.
 const TEMP_LABEL: Record<string, string> = {
-  FROZEN: 'заморозка',
-  COOLED: 'охлаждение',
+  FROZEN: '−18 °C',
+  COOLED: '+2…+4 °C',
   AMBIENT: 'без режима',
 };
 

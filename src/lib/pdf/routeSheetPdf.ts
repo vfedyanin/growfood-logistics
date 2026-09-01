@@ -120,9 +120,11 @@ function cargoRows(list: RouteSheet['stops'][number]['load'], kind: 'load' | 'un
         { text: `${c.pallets ?? '?'} палл.`, alignment: 'right' },
         { text: c.weightKg != null ? `${Math.round(c.weightKg)} кг` : '', color: GREY },
         {
+          // Конечную точку показываем и на выгрузке тоже: на одной точке может
+          // выгружаться несколько грузов, и по направлению видно, какой из них.
           text: [
             { text: c.client ?? '—' },
-            kind === 'load' && c.finalTo ? { text: `  →  ${c.finalTo}`, color: GREY } : '',
+            c.finalTo ? { text: `  →  ${c.finalTo}`, color: GREY } : '',
             c.tempRegime ? { text: `  ${tempLabel(c.tempRegime)}`, color: GREY } : '',
           ],
         },
