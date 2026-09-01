@@ -273,9 +273,10 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
       if (['MSK-SPB', 'SPB-MSK'].includes(code)) return 'spb';
       if (['MSK-VV-DMD', 'MSK-VV-VSH'].includes(code)) return 'vv';
       if (code.startsWith('KZN-')) return 'kzn';
-      if (/-MG-/.test(code)) return 'mg';
+      if (/-MG-/.test(code) || code === 'MSK-FMILES') return 'mg';
       if (/-DX-/.test(code)) return 'dx';
-      if (['MSK-FRESH', 'MSK-PK-VSH', 'MSK-5KA-NOVAYA_RIGA'].includes(code)) return 'msc';
+      // Москва: свои точки + сборка в московский хаб от поставщиков.
+      if (['MSK-FRESH', 'MSK-PK-VSH', 'MSK-5KA-NOVAYA_RIGA', 'CHEF-MSK', 'ELEM-MSK', 'STUDIA-MSK'].includes(code)) return 'msc';
     }
     if (g.rows.some((r) => SPB_LOCAL_DEST.test(r.destName))) return 'spblocal';
     if (g.rows.some((r) => MSC_DEST.test(r.destName))) return 'msc';
