@@ -184,6 +184,7 @@ export default function RequestsPage() {
   const [fCustomer, setFCustomer] = useState<string>();
   const [fVertical, setFVertical] = useState<string>();
   const [fSource, setFSource] = useState<string>();
+  const [fDirection, setFDirection] = useState<string>();
   const [fRange, setFRange] = useState<any>(null);
   const [fDeliveryRange, setFDeliveryRange] = useState<any>(null);
 
@@ -240,6 +241,7 @@ export default function RequestsPage() {
       if (fCustomer) filters.customerId = fCustomer;
       if (fVertical) filters.verticalCode = fVertical;
       if (fSource) filters.source = fSource;
+      if (fDirection) filters.directionId = fDirection;
       // Если выбрана одна дата — точное совпадение (from=startOfDay, to=endOfDay той же даты)
       const pickupFrom = fRange?.[0] ?? fRange?.[1];
       const pickupTo = fRange?.[1] ?? fRange?.[0];
@@ -253,7 +255,7 @@ export default function RequestsPage() {
       setData(await getRequests(filters));
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [fStatus, fCustomer, fVertical, fSource, fRange, fDeliveryRange]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [fStatus, fCustomer, fVertical, fSource, fDirection, fRange, fDeliveryRange]);
   const loadTemplates = async () => setTemplates(await getRequestTemplates());
   useEffect(() => { loadTemplates(); }, []);
 
@@ -622,10 +624,11 @@ export default function RequestsPage() {
 
   return (
     <>
-      <FilterBar onReset={() => { setFStatus(undefined); setFCustomer(undefined); setFVertical(undefined); setFSource(undefined); setFRange(null); setFDeliveryRange(null); }}>
+      <FilterBar onReset={() => { setFStatus(undefined); setFCustomer(undefined); setFVertical(undefined); setFSource(undefined); setFDirection(undefined); setFRange(null); setFDeliveryRange(null); }}>
         <Select placeholder="Статус" allowClear style={{ width: 170 }} value={fStatus} onChange={setFStatus} options={Object.entries(statusCfg).map(([v, c]) => ({ value: v, label: c.label }))} />
         <CustomerSelect placeholder="Заявитель" style={{ width: 200 }} value={fCustomer} onChange={setFCustomer} />
         <VerticalSelect placeholder="Вертикаль" style={{ width: 180 }} value={fVertical} onChange={setFVertical} />
+        <DirectionSelect allowClear placeholder="Направление" style={{ width: 200 }} value={fDirection} onChange={(v: any) => setFDirection(v)} />
         <Select placeholder="Источник" allowClear style={{ width: 150 }} value={fSource} onChange={setFSource} options={[{ value: 'EMAIL_IMPORT', label: 'import' }, { value: 'MANUAL', label: 'вручную' }]} />
         <DatePicker.RangePicker value={fRange} onChange={setFRange} onCalendarChange={setFRange} format="DD.MM.YYYY" placeholder={['Отправка с', 'Отправка по']} />
         <DatePicker.RangePicker value={fDeliveryRange} onChange={setFDeliveryRange} onCalendarChange={setFDeliveryRange} format="DD.MM.YYYY" placeholder={['Доставка с', 'Доставка по']} />
