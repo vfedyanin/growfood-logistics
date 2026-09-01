@@ -67,9 +67,19 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
     select: {
       id: true, directionId: true, pickupLocationId: true, dropoffLocationId: true,
       plannedPickup: true, plannedDropoff: true,
-      cargo: { select: { pallets: true } },
+      // Конечная точка груза — для матча слота шаблона по третьему ключу.
+      // Берём consignee груза, при пустом — deliveryLocation заявки (обычно равны).
+      cargo: {
+        select: {
+          pallets: true, consigneeLocationId: true,
+          request: { select: { deliveryLocationId: true } },
+        },
+      },
     },
   });
+
+  const finalOf = (l: (typeof legs)[number]) =>
+    l.cargo.consigneeLocationId ?? l.cargo.request.deliveryLocationId ?? null;
 
   const skipped: AutoPlanResult['skipped'] = [];
   const add = (reason: SkipReason, directionCode: string | null, items: { pallets: number }[]) => {
@@ -100,7 +110,12 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
     for (const slot of tpl.legs) {
       for (const l of legs) {
         if (consumed.has(l.id)) continue;
-        if (l.pickupLocationId === slot.pickupLocationId && l.dropoffLocationId === slot.dropoffLocationId) {
+        // Матч: обе точки плеча + (если слот задал конечную) совпадение конечной
+        // точки груза. Пустая конечная в слоте = берём любой груз этой пары точек.
+        const pointsMatch =
+          l.pickupLocationId === slot.pickupLocationId && l.dropoffLocationId === slot.dropoffLocationId;
+        const finalMatch = !slot.finalLocationId || finalOf(l) === slot.finalLocationId;
+        if (pointsMatch && finalMatch) {
           mine.push(l);
           consumed.add(l.id);
         }

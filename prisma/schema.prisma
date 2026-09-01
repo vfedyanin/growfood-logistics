@@ -128,6 +128,7 @@ model Location {
   routeStops              RouteStop[]                @relation("RouteStopLocation")
   tptLegsAsPickup         TripPlanTemplateLeg[]      @relation("TPTLegPickup")
   tptLegsAsDropoff        TripPlanTemplateLeg[]      @relation("TPTLegDropoff")
+  tptLegsAsFinal          TripPlanTemplateLeg[]      @relation("TPTLegFinal")
   reqCargoAsConsignee     RequestCargo[]             @relation("RCConsigneeLocation")
   directionsAsOrigin      Direction[]                @relation("DirectionOrigin")
   directionsAsDestination Direction[]                @relation("DirectionDestination")
@@ -1095,10 +1096,17 @@ model TripPlanTemplateLeg {
   pickupLocationId  String
   dropoffLocationId String
   directionId       String? // опционально: для тарифа/группировки
+  // Конечная точка груза — третий ключ матча. Одно и то же заборное плечо
+  // (Йуми → КД Север) едет разным клиентам; по паре точек их не различить,
+  // поэтому слот уточняет, ЧЕЙ забор он берёт: пусто = любой, заполнено =
+  // только груз с этой конечной точкой. Так забор Йуми делится между машиной
+  // Пятёрочки (конечные Пятёрочка/Казань) и машиной Нижнего (Нижний/Воронеж).
+  finalLocationId   String?
 
   template        TripPlanTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
   pickupLocation  Location         @relation("TPTLegPickup", fields: [pickupLocationId], references: [id])
   dropoffLocation Location         @relation("TPTLegDropoff", fields: [dropoffLocationId], references: [id])
+  finalLocation   Location?        @relation("TPTLegFinal", fields: [finalLocationId], references: [id])
   direction       Direction?       @relation(fields: [directionId], references: [id])
 
   @@unique([templateId, position])
