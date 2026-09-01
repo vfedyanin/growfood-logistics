@@ -20,7 +20,7 @@ const reqInclude = {
   pickupLocation: true, deliveryLocation: true,
   parent: { select: { id: true, requestNumber: true } },
 };
-const legInclude = { pickupLocation: true, dropoffLocation: true, tripCargoUnit: { include: { trip: true } } };
+const legInclude = { pickupLocation: true, dropoffLocation: true, direction: { select: { id: true, code: true, name: true } }, tripCargoUnit: { include: { trip: true } } };
 const cargoInclude = { consignee: true, consigneeLocation: true, legs: { include: legInclude, orderBy: { legOrder: 'asc' as const } } };
 
 const num = (v: any) => (v != null ? Number(v) : 0);
@@ -429,11 +429,13 @@ export async function getAllCargoLegs(filters?: {
   tripId?: string; unassigned?: boolean; customerId?: string;
   pickupFrom?: string; pickupTo?: string; dropoffFrom?: string; dropoffTo?: string;
   tripStatus?: string;
+  directionId?: string;
   // Номер плеча: оператор распределяет пачкой либо заборы, либо магистрали.
   legOrder?: number;
 }) {
   await requireAuth();
   const where: any = {};
+  if (filters?.directionId) where.directionId = filters.directionId;
   // «Без рейса» — это отсутствие привязки, а не статус рейса, поэтому отдельная ветка.
   if (filters?.unassigned) where.tripCargoUnitId = null;
   else {
@@ -459,6 +461,7 @@ export async function getAllCargoLegs(filters?: {
     include: {
       pickupLocation: true,
       dropoffLocation: true,
+      direction: { select: { id: true, code: true, name: true } },
       tripCargoUnit: { include: { trip: true } },
       // deliveryLocation заявки нужен колонке «Куда в итоге»: у заборного плеча
       // свои точки это «Йуми → РЦ МСК», по ним не понять, что за груз и куда едет.

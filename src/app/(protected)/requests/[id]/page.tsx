@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Button, Form, Input, InputNumber, Select, DatePicker, TimePicker, Space, Popconfirm, Tag, message,
-  Modal, Divider, Card, Table, Descriptions, Typography, Empty, Segmented, Spin, Alert,
+  Modal, Divider, Card, Table, Descriptions, Typography, Empty, Segmented, Spin, Alert, Tooltip,
 } from 'antd';
 import {
   ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, MinusCircleOutlined,
@@ -269,6 +269,12 @@ export default function RequestDetailPage() {
 
   const legColumns = (cargo: any) => [
     { title: 'Маршрут', key: 'route', render: (_: any, l: any) => `${l.pickupLocation?.name || '—'} → ${l.dropoffLocation?.name || '—'}` },
+    {
+      title: 'Направление', key: 'dir',
+      render: (_: any, l: any) => l.direction
+        ? <Tooltip title={l.direction.name || ''}><Tag>{l.direction.code}</Tag></Tooltip>
+        : <Tag color="red">не задано</Tag>,
+    },
     {
       title: 'Забор / выгрузка', key: 'dates',
       render: (_: any, l: any) => {
