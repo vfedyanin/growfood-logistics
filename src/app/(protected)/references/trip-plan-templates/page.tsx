@@ -109,7 +109,7 @@ export default function TripPlanTemplatesPage() {
   return (
     <>
       <DataTable
-        title="Шаблоны рейсов (автоплан)"
+        title="Шаблоны автоплана"
         data={data}
         columns={columns}
         loading={loading}
