@@ -7,7 +7,7 @@ import DataTable from '@/components/DataTable';
 import { usePermissions } from '@/hooks/usePermissions';
 import EntityForm from '@/components/EntityForm';
 import { getDirections, createDirection, updateDirection, deleteDirection, getRouteStops, setRouteStops } from '@/lib/actions/references';
-import { CarrierSelect, LocationSelect, DirectionSelect } from '@/components/selects/EntitySelects';
+import { CarrierSelect, LocationSelect } from '@/components/selects/EntitySelects';
 
 export default function DirectionsPage() {
   const { can } = usePermissions();
@@ -132,15 +132,6 @@ export default function DirectionsPage() {
               { value: 'SPLIT', label: 'Дробить по вместимости' },
             ]}
           />
-        </Form.Item>
-        {/* Чей рейс забирает груз с производства. Правило живёт в данных, а не в
-            коде: поменялись объёмы — переставили здесь. */}
-        <Form.Item
-          name="pickupViaDirectionId"
-          label="Забор с производства везёт рейс направления"
-          extra="Пусто — забор едет своим рейсом. Указано — заборное плечо (производство → хаб) уходит на машину выбранного направления, а из хаба груз идёт своим рейсом. Стоимость забора уже внутри тарифа того направления. Пример: у Казани указать «Москва → Пятёрочка НН», у Воронежа — «Москва → Нижний Новгород»."
-        >
-          <DirectionSelect style={{ width: '100%' }} allowClear />
         </Form.Item>
         <Form.Item name="isActive" label="Активно" valuePropName="checked"><Switch /></Form.Item>
 
