@@ -20,7 +20,7 @@ const reqInclude = {
   pickupLocation: true, deliveryLocation: true,
   parent: { select: { id: true, requestNumber: true } },
 };
-const legInclude = { pickupLocation: true, dropoffLocation: true, tripCargoUnit: { include: { trip: true } } };
+const legInclude = { pickupLocation: true, dropoffLocation: true, direction: { select: { id: true, code: true, name: true } }, tripCargoUnit: { include: { trip: true } } };
 const cargoInclude = { consignee: true, consigneeLocation: true, legs: { include: legInclude, orderBy: { legOrder: 'asc' as const } } };
 
 const num = (v: any) => (v != null ? Number(v) : 0);
