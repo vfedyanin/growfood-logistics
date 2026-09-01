@@ -31,8 +31,16 @@ export type SkipReason =
   | 'NO_TARIFF';     // у перевозчика нет действующего тарифа на это направление
 
 export type PlannedTrip = PackedTruck & {
-  directionId: string;
+  // Откуда рейс: TEMPLATE — из жёсткого шаблона рейса (первый проход);
+  // DIRECTION — из старого автоплана по направлению (второй проход, по остатку).
+  source: 'TEMPLATE' | 'DIRECTION';
+  templateId?: string;
+  // Подпись для отчёта: код направления либо имя шаблона.
   directionCode: string;
+  // У шаблонного рейса своего направления может не быть — точки берём из слотов.
+  directionId: string | null;
+  originId: string | null;
+  destinationId: string | null;
   carrierId: string;
   carrierName: string;
   plannedDeparture: Date | null;
@@ -57,7 +65,8 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
   const legs = await prisma.requestCargoLeg.findMany({
     where: { plannedPickup: { gte: day, lt: dayEnd }, tripCargoUnitId: null },
     select: {
-      id: true, directionId: true, plannedPickup: true, plannedDropoff: true,
+      id: true, directionId: true, pickupLocationId: true, dropoffLocationId: true,
+      plannedPickup: true, plannedDropoff: true,
       cargo: { select: { pallets: true } },
     },
   });
@@ -67,17 +76,76 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
     skipped.push({ reason, directionCode, legs: items.length, pallets: items.reduce((s, i) => s + i.pallets, 0) });
   };
 
-  const noDir = legs.filter((l) => !l.directionId);
+  const trips: PlannedTrip[] = [];
+
+  // ── ПРОХОД 1: жёсткие шаблоны рейсов ────────────────────────────────────────
+  // Шаблон = одна машина с фиксированным набором плеч. Плечо садится в слот при
+  // совпадении ОБЕИХ точек (забор+выгрузка). Матч жадный и одноразовый: плечо,
+  // занятое шаблоном, из общего пула убирается и во второй проход не идёт.
+  const consumed = new Set<string>();
+  const palletsOf = (l: (typeof legs)[number]) => l.cargo.pallets ?? 0;
+
+  const templates = await prisma.tripPlanTemplate.findMany({
+    where: { isActive: true },
+    include: {
+      carrier: { select: { name: true } },
+      vehicleType: { select: { capacityPallets: true } },
+      legs: { orderBy: { position: 'asc' } },
+    },
+  });
+
+  for (const tpl of templates) {
+    if (!tpl.legs.length) continue;
+    const mine: typeof legs = [];
+    for (const slot of tpl.legs) {
+      for (const l of legs) {
+        if (consumed.has(l.id)) continue;
+        if (l.pickupLocationId === slot.pickupLocationId && l.dropoffLocationId === slot.dropoffLocationId) {
+          mine.push(l);
+          consumed.add(l.id);
+        }
+      }
+    }
+    if (!mine.length) continue; // сегодня для этой машины груза нет — рейс не создаём
+
+    const pallets = mine.reduce((s, l) => s + palletsOf(l), 0);
+    const capacity = tpl.vehicleType.capacityPallets ?? pallets;
+    const firstSlot = tpl.legs[0];
+    const lastSlot = tpl.legs[tpl.legs.length - 1];
+    const pickups = mine.map((l) => l.plannedPickup).filter(Boolean) as Date[];
+    const dropoffs = mine.map((l) => l.plannedDropoff).filter(Boolean) as Date[];
+
+    trips.push({
+      source: 'TEMPLATE',
+      templateId: tpl.id,
+      directionCode: tpl.name,
+      directionId: null,
+      originId: firstSlot.pickupLocationId,
+      destinationId: lastSlot.dropoffLocationId,
+      carrierId: tpl.carrierId,
+      carrierName: tpl.carrier.name,
+      vehicleTypeCode: tpl.vehicleTypeCode,
+      capacity,
+      pallets,
+      overload: pallets > capacity,
+      legIds: mine.map((l) => l.id),
+      plannedDeparture: pickups.length ? new Date(Math.min(...pickups.map((d) => d.getTime()))) : null,
+      plannedArrival: dropoffs.length ? new Date(Math.max(...dropoffs.map((d) => d.getTime()))) : null,
+    });
+  }
+
+  // ── ПРОХОД 2: старый автоплан по направлениям, по ОСТАВШИМСЯ плечам ──────────
+  const rest = legs.filter((l) => !consumed.has(l.id));
+
+  const noDir = rest.filter((l) => !l.directionId);
   if (noDir.length) add('NO_DIRECTION', null, noDir.map((l) => ({ pallets: l.cargo.pallets ?? 0 })));
 
   const byDirection = new Map<string, typeof legs>();
-  for (const l of legs) {
+  for (const l of rest) {
     if (!l.directionId) continue;
     if (!byDirection.has(l.directionId)) byDirection.set(l.directionId, []);
     byDirection.get(l.directionId)!.push(l);
   }
-
-  const trips: PlannedTrip[] = [];
 
   for (const [directionId, dirLegs] of Array.from(byDirection.entries())) {
     const dir = await prisma.direction.findUnique({
@@ -102,8 +170,11 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
       const dropoffs = mine.map((l) => l.plannedDropoff).filter(Boolean) as Date[];
       trips.push({
         ...truck,
+        source: 'DIRECTION',
         directionId: dir.id,
         directionCode: dir.code,
+        originId: dir.originId,
+        destinationId: dir.destinationId,
         carrierId: dir.carrierId,
         carrierName: dir.carrier?.name ?? '',
         plannedDeparture: pickups.length ? new Date(Math.min(...pickups.map((d) => d.getTime()))) : null,
@@ -117,7 +188,7 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
     trips,
     skipped,
     unassignedLegs: legs.length,
-    legsWithoutDirection: noDir.length,
+    legsWithoutDirection: noDir.length, // без направления и не подобранные шаблоном
   };
 }
 
@@ -159,11 +230,21 @@ export async function applyAutoPlan(dateISO: string, actor: string | null) {
   const created: string[] = [];
 
   for (const t of plan.trips) {
-    const dir = await prisma.direction.findUnique({
-      where: { id: t.directionId },
-      select: { originId: true, destinationId: true, distanceKm: true },
-    });
-    if (!dir?.originId || !dir?.destinationId) continue; // без точек рейс не создать
+    // Точки рейса: у направления — из справочника, у шаблона — из слотов (лежат
+    // в самом PlannedTrip). Без точек рейс не создать.
+    let originId = t.originId;
+    let destinationId = t.destinationId;
+    let distanceKm: number | null = null;
+    if (t.source === 'DIRECTION' && t.directionId) {
+      const dir = await prisma.direction.findUnique({
+        where: { id: t.directionId },
+        select: { originId: true, destinationId: true, distanceKm: true },
+      });
+      originId = dir?.originId ?? null;
+      destinationId = dir?.destinationId ?? null;
+      distanceKm = dir?.distanceKm != null ? Number(dir.distanceKm) : null;
+    }
+    if (!originId || !destinationId) continue;
 
     // Вертикали берём по ВСЕМ плечам рейса, а не с первого: в одну машину
     // попадают заявки разных вертикалей (на боевых данных LAAS-LTL + PRIEM), и
@@ -179,11 +260,12 @@ export async function applyAutoPlan(dateISO: string, actor: string | null) {
     const verticalCode = verticalCodes.length === 1 ? verticalCodes[0] : null;
 
     // Стоимость по тарифу перевозчика — сразу при создании, тем же ключом
-    // (направление/пара точек), что и подбор машины. Раньше автоплан оставлял
-    // actualCost пустым, и рейсы шли без денег. На дату выезда, иначе на день плана.
+    // (направление/пара точек), что и подбор машины. У шаблонного рейса своего
+    // направления нет — считаем по паре точек. Забор Йуми при этом обычно даёт
+    // null: его стоимость внутри тарифа магистрали, отдельной ставки нет.
     const costDate = t.plannedDeparture ?? new Date(dateISO.slice(0, 10) + 'T00:00:00.000Z');
     const actualCost = await activeCarrierTripCost(
-      { id: t.directionId, originId: dir.originId, destinationId: dir.destinationId, distanceKm: dir.distanceKm != null ? Number(dir.distanceKm) : null },
+      { id: t.directionId ?? '', originId, destinationId, distanceKm },
       t.carrierId,
       t.vehicleTypeCode,
       t.pallets,
@@ -197,8 +279,8 @@ export async function applyAutoPlan(dateISO: string, actor: string | null) {
         verticalCode,
         verticalCodes,
         directionId: t.directionId,
-        originId: dir.originId,
-        destinationId: dir.destinationId,
+        originId,
+        destinationId,
         carrierId: t.carrierId,
         vehicleTypeCode: t.vehicleTypeCode,
         plannedPallets: t.pallets,
