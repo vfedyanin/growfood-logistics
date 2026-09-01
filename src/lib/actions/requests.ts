@@ -98,16 +98,13 @@ function assertLegsHaveDirection(cargoes: any[]) {
 // как в main: по плательщику с фолбэком на заказчика, источник — clientTariff.
 
 // ============ List / Get ============
-export async function getRequests(filters?: { status?: RequestStatus; customerId?: string; verticalCode?: string; source?: string; directionId?: string; dateFrom?: string; dateTo?: string; deliveryFrom?: string; deliveryTo?: string }) {
+export async function getRequests(filters?: { status?: RequestStatus; customerId?: string; verticalCode?: string; source?: string; dateFrom?: string; dateTo?: string; deliveryFrom?: string; deliveryTo?: string }) {
   await requireAuth();
   const where: any = {};
   if (filters?.status) where.status = filters.status;
   if (filters?.customerId) where.customerId = filters.customerId;
   if (filters?.verticalCode) where.verticalCode = filters.verticalCode;
   if (filters?.source) where.source = filters.source;
-  // Направление — у плеча, не у заявки: показываем заявку, где хоть одно плечо
-  // на этом направлении. some проходит через груз к плечу.
-  if (filters?.directionId) where.cargoes = { some: { legs: { some: { directionId: filters.directionId } } } };
   const result = await prisma.customerRequest.findMany({
     where,
     include: { ...reqInclude, cargoes: { include: cargoInclude }, invoices: true },
