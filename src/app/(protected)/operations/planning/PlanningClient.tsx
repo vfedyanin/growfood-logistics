@@ -275,13 +275,17 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
       if (code.startsWith('KZN-')) return 'kzn';
       if (/-MG-/.test(code) || code === 'MSK-FMILES') return 'mg';
       if (/-DX-/.test(code)) return 'dx';
-      // Москва: свои точки + сборка в московский хаб от поставщиков.
-      if (['MSK-FRESH', 'MSK-PK-VSH', 'MSK-5KA-NOVAYA_RIGA', 'CHEF-MSK', 'ELEM-MSK', 'STUDIA-MSK'].includes(code)) return 'msc';
+      if (['MSK-FRESH', 'MSK-PK-VSH', 'MSK-5KA-NOVAYA_RIGA'].includes(code)) return 'msc';
     }
     if (g.rows.some((r) => SPB_LOCAL_DEST.test(r.destName))) return 'spblocal';
     if (g.rows.some((r) => MSC_DEST.test(r.destName))) return 'msc';
     return 'msk';
   }
+
+  // Сборка в московский хаб от поставщиков (поставщик → РЦ МСК). В планировании
+  // не нужна — это внутренняя логистика, не отгрузка клиенту. Прячем целиком.
+  const HIDDEN_CODES = new Set(['CHEF-MSK', 'ELEM-MSK', 'STUDIA-MSK']);
+  const visibleGroups = groups.filter((g) => !(g.code && HIDDEN_CODES.has(g.code)));
 
   type SuperGroup = { key: string; title: string; groups: Group[] };
   const SUPER_ORDER: { key: string; title: string }[] = [
@@ -297,7 +301,7 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
   const superMap = new Map<string, SuperGroup>(
     SUPER_ORDER.map((s) => [s.key, { key: `super:${s.key}`, title: s.title, groups: [] }]),
   );
-  for (const g of groups) superMap.get(superKeyOf(g))!.groups.push(g);
+  for (const g of visibleGroups) superMap.get(superKeyOf(g))!.groups.push(g);
   const superGroups = SUPER_ORDER.map((s) => superMap.get(s.key)!).filter((sg) => sg.groups.length);
 
   function findRequest(customerId: string, oId: string, dId: string, dayDate: dayjs.Dayjs): Req | undefined {
