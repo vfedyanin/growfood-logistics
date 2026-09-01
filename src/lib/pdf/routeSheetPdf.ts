@@ -185,7 +185,7 @@ function sheetContent(s: RouteSheet): Content[] {
     margin: [0, 14, 0, 8],
   });
   body.push({
-    text: `Всего в рейсе: ${s.stops.length} точек, ${s.totalPallets} палл.`,
+    text: `Всего в рейсе: ${s.stops.length} точек, ${s.totalPallets} палл. общего объёма перевозки`,
     bold: true,
     fontSize: 10,
   });
