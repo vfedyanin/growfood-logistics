@@ -188,11 +188,11 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
     dayShift: number;
     schedule: Schedule | null; // null → только для чтения
   };
-  type Group = { key: string; title: string; subtitle: string | null; rows: Row[] };
+  type Group = { key: string; title: string; subtitle: string | null; code: string | null; rows: Row[] };
   const groupMap = new Map<string, Group>();
 
-  function ensureGroup(key: string, title: string, subtitle: string | null) {
-    if (!groupMap.has(key)) groupMap.set(key, { key, title, subtitle, rows: [] });
+  function ensureGroup(key: string, title: string, subtitle: string | null, code: string | null) {
+    if (!groupMap.has(key)) groupMap.set(key, { key, title, subtitle, code, rows: [] });
     return groupMap.get(key)!;
   }
 
@@ -205,6 +205,7 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
       md
         ? (md.originName && md.destinationName ? `${md.originName} → ${md.destinationName}` : null)
         : 'направление не определено — у графика нет шаблона с магистральным плечом',
+      md ? md.code : null,
     );
     g.rows.push({
       key: s.id,
@@ -227,6 +228,7 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
         `dir:${on.directionId}`,
         `${on.code}${on.name ? ` · ${on.name}` : ''}`,
         on.originName && on.destinationName ? `${on.originName} → ${on.destinationName}` : null,
+        on.code,
       );
       og.rows.push({
         key: `${s.id}__${on.directionId}`,
@@ -252,6 +254,41 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
       a.customerName.localeCompare(b.customerName, 'ru')
     );
   }
+
+  // Верхний уровень: крупные блоки, внутри — направления как есть. Классификация
+  // по коду направления (со слов пользователя). Москвой считаем и точки без
+  // своего кода — по названию конечной точки (Самокаты Пушкино/Фрязино/Солнечная
+  // едут сборным MSK-MSK, отдельного направления у них нет). Всё, что не попало в
+  // именованные блоки, падает в «Магистраль МСК» — это и есть «всё, что выезжает
+  // из Москвы», плюс сборка внутри города; так ни одно направление не исчезает.
+  const MSC_DEST = /Пушкино|Фрязино|Солнечн|Перекрёсток\s+Вешки|Новая\s+Рига|Пятёрочка\s+Рига/i;
+  function superKeyOf(g: Group): string {
+    const code = g.code;
+    if (code) {
+      if (code.startsWith('KZN-')) return 'kzn';
+      if (/-MG-/.test(code)) return 'mg';
+      if (/-DX-/.test(code)) return 'dx';
+      if (['MSK-SPB', 'SPB-MSK', 'SPB-SPB', 'KLP-SPB'].includes(code)) return 'spb';
+      if (['MSK-PK-VSH', 'MSK-5KA-NOVAYA_RIGA'].includes(code)) return 'msc';
+    }
+    if (g.rows.some((r) => MSC_DEST.test(r.destName))) return 'msc';
+    return 'msk';
+  }
+
+  type SuperGroup = { key: string; title: string; groups: Group[] };
+  const SUPER_ORDER: { key: string; title: string }[] = [
+    { key: 'msk', title: 'Магистраль МСК' },
+    { key: 'kzn', title: 'Магистраль КЗН' },
+    { key: 'spb', title: 'Магистраль СПБ' },
+    { key: 'mg', title: 'Магнит' },
+    { key: 'dx', title: 'Дикси' },
+    { key: 'msc', title: 'Москва' },
+  ];
+  const superMap = new Map<string, SuperGroup>(
+    SUPER_ORDER.map((s) => [s.key, { key: `super:${s.key}`, title: s.title, groups: [] }]),
+  );
+  for (const g of groups) superMap.get(superKeyOf(g))!.groups.push(g);
+  const superGroups = SUPER_ORDER.map((s) => superMap.get(s.key)!).filter((sg) => sg.groups.length);
 
   function findRequest(customerId: string, oId: string, dId: string, dayDate: dayjs.Dayjs): Req | undefined {
     const dayStr = dayDate.format('YYYY-MM-DD');
@@ -456,13 +493,60 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
         </pre>
       </Modal>
 
-      {groups.length === 0 && (
+      {superGroups.length === 0 && (
         <div style={{ textAlign: 'center', color: '#888', padding: 48 }}>
           Нет направлений с расписаниями. Добавьте расписание в карточке договора.
         </div>
       )}
 
-      {groups.map(group => {
+      {superGroups.map(sg => {
+        const sgExpanded = expanded.has(sg.key);
+        const sgRows = sg.groups.flatMap(g => g.rows);
+        const sgR = readiness(sgRows);
+        return (
+        <div key={sg.key} style={{ marginBottom: 12 }}>
+          {/* Верхний уровень: крупный блок. Свёрнут по умолчанию — открывают
+              нужный, а не всё сразу. Индикатор — суммарная готовность к завтра. */}
+          <div
+            onClick={() => toggleGroup(sg.key)}
+            style={{
+              padding: '12px 16px', background: '#f0f5ff', border: '1px solid #adc6ff',
+              borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center',
+              gap: 10, userSelect: 'none', marginBottom: sgExpanded ? 10 : 0,
+            }}
+          >
+            {sgExpanded
+              ? <DownOutlined style={{ fontSize: 11, color: '#2f54eb' }} />
+              : <RightOutlined style={{ fontSize: 11, color: '#2f54eb' }} />}
+            {sgR && (() => {
+              const dayLabel = `${DAY_SHORT[tomorrowIdx].toLowerCase()} ${weekDates[tomorrowIdx].format('D MMM')}`;
+              if (sgR.filled === 0) return (
+                <Tooltip title={`Отгрузка ${dayLabel}: не заполнено ни одной строки из ${sgR.scheduled}`}>
+                  <CloseCircleFilled style={{ color: '#ff4d4f', fontSize: 15 }} />
+                </Tooltip>
+              );
+              if (sgR.filled < sgR.scheduled) return (
+                <Tooltip title={`Отгрузка ${dayLabel}: заполнено ${sgR.filled} из ${sgR.scheduled}`}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                    <ExclamationCircleFilled style={{ color: '#faad14', fontSize: 15 }} />
+                    <Text style={{ fontSize: 12, color: '#ad6800', fontVariantNumeric: 'tabular-nums' }}>{sgR.filled}/{sgR.scheduled}</Text>
+                  </span>
+                </Tooltip>
+              );
+              return (
+                <Tooltip title={`Отгрузка ${dayLabel}: заполнены все ${sgR.scheduled}`}>
+                  <CheckCircleFilled style={{ color: '#52c41a', fontSize: 15 }} />
+                </Tooltip>
+              );
+            })()}
+            <Text strong style={{ fontSize: 15 }}>{sg.title}</Text>
+            <Text type="secondary" style={{ fontSize: 12, marginLeft: 'auto' }}>
+              {sg.groups.length} {sg.groups.length === 1 ? 'направление' : sg.groups.length < 5 ? 'направления' : 'направлений'}
+            </Text>
+          </div>
+          {sgExpanded && (
+          <div style={{ paddingLeft: 14 }}>
+      {sg.groups.map(group => {
         const isExpanded = expanded.has(group.key);
         return (
         <div
@@ -708,6 +792,11 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
               </tfoot>
             </table>
           </div>
+        </div>
+        );
+      })}
+          </div>
+          )}
         </div>
         );
       })}
