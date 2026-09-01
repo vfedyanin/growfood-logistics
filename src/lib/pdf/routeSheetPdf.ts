@@ -111,12 +111,12 @@ function header(s: RouteSheet): Content[] {
 }
 
 function cargoRows(list: RouteSheet['stops'][number]['load'], kind: 'load' | 'unload'): Content {
-  const sign = kind === 'load' ? '+' : '−';
+  const mark = kind === 'load' ? '+ Загружаем' : '− Выгружаем';
   return {
     table: {
-      widths: [12, 42, 'auto', '*', 'auto'],
+      widths: [72, 42, 'auto', '*', 'auto'],
       body: list.map((c) => [
-        { text: sign, bold: true, color: kind === 'load' ? '#0a7d32' : '#a33' },
+        { text: mark, bold: true, color: kind === 'load' ? '#0a7d32' : '#a33' },
         { text: `${c.pallets ?? '?'} палл.`, alignment: 'right' },
         { text: c.weightKg != null ? `${Math.round(c.weightKg)} кг` : '', color: GREY },
         {
@@ -138,7 +138,7 @@ function cargoRows(list: RouteSheet['stops'][number]['load'], kind: 'load' | 'un
 function stopBlock(stop: RouteSheet['stops'][number], index: number): Content[] {
   const kind =
     stop.load.length && stop.unload.length
-      ? 'погрузка и выгрузка'
+      ? 'выгрузка и погрузка'
       : stop.load.length
         ? 'погрузка'
         : 'выгрузка';
@@ -162,8 +162,9 @@ function stopBlock(stop: RouteSheet['stops'][number], index: number): Content[] 
   if (stop.address) {
     out.push({ text: stop.address, color: GREY, fontSize: 9, margin: [16, 1, 0, 0] });
   }
-  if (stop.load.length) out.push(cargoRows(stop.load, 'load'));
+  // На точке сначала выгружаем, потом загружаем — так это делает и водитель.
   if (stop.unload.length) out.push(cargoRows(stop.unload, 'unload'));
+  if (stop.load.length) out.push(cargoRows(stop.load, 'load'));
   return out;
 }
 
