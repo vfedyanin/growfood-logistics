@@ -1,14 +1,14 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Button, Form, Select, DatePicker, Space, Popconfirm, Tag, message, Modal } from 'antd';
+import { Button, Form, Select, DatePicker, Space, Popconfirm, Tag, Tooltip, message, Modal } from 'antd';
 import { CarOutlined, DisconnectOutlined, PlusOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import AsyncSelect from '@/components/selects/AsyncSelect';
-import { CustomerSelect } from '@/components/selects/EntitySelects';
+import { CustomerSelect, DirectionSelect } from '@/components/selects/EntitySelects';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
   getAllCargoLegs, getAllTripOptions, getAssignableTripOptions,
@@ -48,6 +48,7 @@ export default function CargoPage() {
   // а не по словам «забор» и «магистраль»: у шаблонов без заборного плеча
   // магистраль идёт первой, и подписи по номеру врали бы.
   const [fLegOrder, setFLegOrder] = useState<number | undefined>();
+  const [fDirection, setFDirection] = useState<string | undefined>();
 
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -68,6 +69,7 @@ export default function CargoPage() {
         if (fStatus) filters.tripStatus = fStatus;
       }
       if (fCustomer) filters.customerId = fCustomer;
+      if (fDirection) filters.directionId = fDirection;
       if (fLegOrder) filters.legOrder = fLegOrder;
       if (fPickup?.[0]) filters.pickupFrom = fPickup[0].startOf('day').toISOString();
       if (fPickup?.[1]) filters.pickupTo = fPickup[1].endOf('day').toISOString();
@@ -76,7 +78,7 @@ export default function CargoPage() {
       setData(await getAllCargoLegs(filters));
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filterTrip, fCustomer, fPickup, fDropoff, fStatus, fLegOrder]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filterTrip, fCustomer, fPickup, fDropoff, fStatus, fLegOrder, fDirection]);
   useEffect(() => { getAllTripOptions().then(setTripOptions); }, []);
 
   const openAssign = (l: any) => { setAssigningLeg(l); assignForm.resetFields(); setAssignOpen(true); };
@@ -98,6 +100,12 @@ export default function CargoPage() {
     {
       title: 'Плечо', key: 'route',
       render: (_: any, l: any) => `${l.legOrder ? `#${l.legOrder} ` : ''}${l.pickupLocation?.name || '—'} → ${l.dropoffLocation?.name || '—'}`,
+    },
+    {
+      title: 'Направление', key: 'dir',
+      render: (_: any, l: any) => l.direction
+        ? <Tooltip title={l.direction.name || ''}><Tag>{l.direction.code}</Tag></Tooltip>
+        : <Tag color="red">не задано</Tag>,
     },
     {
       // Точки самого плеча ничего не говорят: у заборного это «Йуми → РЦ МСК».
@@ -131,7 +139,7 @@ export default function CargoPage() {
 
   return (
     <>
-      <FilterBar onReset={() => { setFilterTrip(undefined); setFCustomer(undefined); setFPickup(null); setFDropoff(null); setFStatus(undefined); setFLegOrder(undefined); }}>
+      <FilterBar onReset={() => { setFilterTrip(undefined); setFCustomer(undefined); setFPickup(null); setFDropoff(null); setFStatus(undefined); setFLegOrder(undefined); setFDirection(undefined); }}>
         {/* «Без рейса» живёт здесь, а не в фильтре рейсов: два контрола с одним
             смыслом путали бы и могли противоречить друг другу. */}
         <Select
@@ -156,6 +164,7 @@ export default function CargoPage() {
           options={tripOptions}
         />
         <CustomerSelect placeholder="Заявитель" style={{ width: 200 }} value={fCustomer} onChange={setFCustomer} />
+        <DirectionSelect allowClear placeholder="Направление" style={{ width: 200 }} value={fDirection} onChange={(v: any) => setFDirection(v)} />
         <Select
           placeholder="Номер плеча"
           allowClear
