@@ -9,6 +9,7 @@ import {
   ArrowLeftOutlined, LoginOutlined, LogoutOutlined, WarningOutlined,
   DollarOutlined, PlusOutlined, DeleteOutlined, EditOutlined,
   DownOutlined, RightOutlined, ArrowDownOutlined, ArrowUpOutlined, SwapRightOutlined,
+  PrinterOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useParams, useRouter } from 'next/navigation';
@@ -587,6 +588,13 @@ export default function TripDetailPage() {
             <Button danger>Отменить</Button>
           </Popconfirm>
         )}
+        <Button
+          icon={<PrinterOutlined />}
+          href={`/api/trips/route-sheet?ids=${trip.id}`}
+          target="_blank"
+        >
+          Маршрутный лист (PDF)
+        </Button>
         {canQuality && (
           <Button icon={<WarningOutlined />} onClick={openQuality}>
             Зарегистрировать инцидент

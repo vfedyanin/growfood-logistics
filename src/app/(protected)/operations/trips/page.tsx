@@ -7,7 +7,7 @@ import {
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, MoreOutlined,
-  EyeOutlined, HolderOutlined,
+  EyeOutlined, HolderOutlined, PrinterOutlined,
 } from '@ant-design/icons';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
@@ -83,6 +83,8 @@ export default function TripsPage() {
   const [editing, setEditing] = useState<any>(null);
   const [form] = Form.useForm();
   const [existingCargo, setExistingCargo] = useState<any[]>([]);
+  // Выделенные рейсы — только для массовой выгрузки маршрутных листов.
+  const [selected, setSelected] = useState<string[]>([]);
   const [removeIds, setRemoveIds] = useState<string[]>([]);
   const toggleRemove = (id: string) => setRemoveIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
@@ -409,6 +411,36 @@ export default function TripsPage() {
     },
   ];
 
+  // Маршрутные листы выделенных рейсов — одним PDF, каждый лист с новой страницы.
+  // Скачиваем через fetch, а не переходом по ссылке: при отказе сервера (нет прав,
+  // рейс не найден) переход показал бы пользователю голый JSON вместо сообщения.
+  const downloadRouteSheets = async () => {
+    if (!selected.length) return;
+    const hide = message.loading('Готовим маршрутные листы…', 0);
+    try {
+      const res = await fetch(`/api/trips/route-sheet?ids=${selected.join(',')}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        message.error(body?.error ?? 'Не удалось сформировать маршрутный лист');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download =
+        selected.length === 1
+          ? `marshrutnyy-list-${data.find((t) => t.id === selected[0])?.tripNumber ?? 'trip'}.pdf`
+          : `marshrutnye-listy-${selected.length}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      message.error('Не удалось сформировать маршрутный лист');
+    } finally {
+      hide();
+    }
+  };
+
   const onCargoSelect = async (legId: any, rowName: number) => {
     if (!legId) return;
     const dates = await getCargoLegDates(legId);
@@ -445,7 +477,21 @@ export default function TripsPage() {
 
       <DataTable title="Рейсы" data={data} columns={columns} loading={loading} scrollX={1100}
         searchableKeys={['tripNumber', 'carrier.name', 'origin.name', 'destination.name']}
-        toolbar={canWrite ? <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Создать рейс</Button> : undefined} />
+        rowSelection={{ selectedRowKeys: selected, onChange: (keys) => setSelected(keys as string[]) }}
+        toolbar={
+          <Space>
+            <Button
+              icon={<PrinterOutlined />}
+              disabled={!selected.length}
+              onClick={downloadRouteSheets}
+            >
+              {selected.length > 1
+                ? `Маршрутные листы (${selected.length})`
+                : 'Маршрутный лист'}
+            </Button>
+            {canWrite && <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>Создать рейс</Button>}
+          </Space>
+        } />
 
       {/* ===== Создание / редактирование ===== */}
       <EntityForm open={open} title={editing ? `Рейс ${editing.tripNumber}` : 'Новый рейс'} form={form}
