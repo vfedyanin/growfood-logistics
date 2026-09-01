@@ -116,23 +116,26 @@ model Location {
   createdById String?
   updatedById String?
 
-  tripsAsOrigin       Trip[]            @relation("TripOrigin")
-  tripsAsDestination  Trip[]            @relation("TripDestination")
-  customerDeliveries  CustomerDeliveryLocation[]
-  legsAsOrigin        TripLeg[]         @relation("LegOrigin")
-  legsAsDestination   TripLeg[]         @relation("LegDestination")
-  requestsAsPickup    CustomerRequest[] @relation("ReqPickup")
-  requestsAsDelivery  CustomerRequest[] @relation("ReqDelivery")
-  reqLegAsPickup      RequestCargoLeg[] @relation("RCLPickup")
-  reqLegAsDropoff     RequestCargoLeg[] @relation("RCLDropoff")
-  routeStops          RouteStop[]       @relation("RouteStopLocation")
-  reqCargoAsConsignee     RequestCargo[]    @relation("RCConsigneeLocation")
-  directionsAsOrigin      Direction[]       @relation("DirectionOrigin")
-  directionsAsDestination Direction[]       @relation("DirectionDestination")
-  tariffsAsOrigin         Tariff[]          @relation("TariffOrigin")
-  tariffsAsDestination    Tariff[]          @relation("TariffDestination")
-  schedulesAsOrigin       DirectionSchedule[] @relation("ScheduleOrigin")
-  schedulesAsDestination  DirectionSchedule[] @relation("ScheduleDestination")
+  tripsAsOrigin           Trip[]                     @relation("TripOrigin")
+  tripsAsDestination      Trip[]                     @relation("TripDestination")
+  customerDeliveries      CustomerDeliveryLocation[]
+  legsAsOrigin            TripLeg[]                  @relation("LegOrigin")
+  legsAsDestination       TripLeg[]                  @relation("LegDestination")
+  requestsAsPickup        CustomerRequest[]          @relation("ReqPickup")
+  requestsAsDelivery      CustomerRequest[]          @relation("ReqDelivery")
+  reqLegAsPickup          RequestCargoLeg[]          @relation("RCLPickup")
+  reqLegAsDropoff         RequestCargoLeg[]          @relation("RCLDropoff")
+  routeStops              RouteStop[]                @relation("RouteStopLocation")
+  tptLegsAsPickup         TripPlanTemplateLeg[]      @relation("TPTLegPickup")
+  tptLegsAsDropoff        TripPlanTemplateLeg[]      @relation("TPTLegDropoff")
+  tptLegsAsFinal          TripPlanTemplateLeg[]      @relation("TPTLegFinal")
+  reqCargoAsConsignee     RequestCargo[]             @relation("RCConsigneeLocation")
+  directionsAsOrigin      Direction[]                @relation("DirectionOrigin")
+  directionsAsDestination Direction[]                @relation("DirectionDestination")
+  tariffsAsOrigin         Tariff[]                   @relation("TariffOrigin")
+  tariffsAsDestination    Tariff[]                   @relation("TariffDestination")
+  schedulesAsOrigin       DirectionSchedule[]        @relation("ScheduleOrigin")
+  schedulesAsDestination  DirectionSchedule[]        @relation("ScheduleDestination")
 }
 
 enum LocationType {
@@ -151,43 +154,43 @@ enum LocationOwnerType {
 }
 
 model Customer {
-  id            String       @id @default(cuid())
-  code          String       @unique
-  name          String
-  inn           String?      @unique
-  kpp           String?
-  fullLegalName String?
-  verticalCode  String
-  customerType  CustomerType
-  partyRole     PartyRole    @default(BOTH)
-  contactPerson String?
-  phone         String?
-  email         String?
-  isActive      Boolean      @default(true)
+  id                String       @id @default(cuid())
+  code              String       @unique
+  name              String
+  inn               String?      @unique
+  kpp               String?
+  fullLegalName     String?
+  verticalCode      String
+  customerType      CustomerType
+  partyRole         PartyRole    @default(BOTH)
+  contactPerson     String?
+  phone             String?
+  email             String?
+  isActive          Boolean      @default(true)
   // Авто-импорт заявок из писем (PDF). Включается только при заполненном email.
-  autoImportEnabled Boolean  @default(false)
-  importSince   DateTime?    // забирать только письма после этой даты (watermark по контрагенту)
-  parserKey     String?      // ключ парсера PDF для этого контрагента (напр. "korolevsky-vkus")
-  notes         String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  createdById   String?
-  updatedById   String?
+  autoImportEnabled Boolean      @default(false)
+  importSince       DateTime? // забирать только письма после этой даты (watermark по контрагенту)
+  parserKey         String? // ключ парсера PDF для этого контрагента (напр. "korolevsky-vkus")
+  notes             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  createdById       String?
+  updatedById       String?
 
   vertical Vertical @relation(fields: [verticalCode], references: [code])
 
   contracts           CustomerContract[]
   ownedCargoUnits     CargoUnit[]
-  tripsAsShipper      Trip[]             @relation("TripShipper")
-  tripsAsConsignee    Trip[]             @relation("TripConsignee")
-  tripsAsPayer        Trip[]             @relation("TripPayer")
-  tcuAsCustomer       TripCargoUnit[]    @relation("TCUCustomer")
-  tcuAsShipper        TripCargoUnit[]    @relation("TCUShipper")
-  requestsAsCustomer  CustomerRequest[]  @relation("ReqCustomer")
-  requestsAsShipper   CustomerRequest[]  @relation("ReqShipper")
-  requestsAsConsignee CustomerRequest[]  @relation("ReqConsignee")
-  requestsAsPayer     CustomerRequest[]  @relation("ReqPayer")
-  reqCargoAsConsignee RequestCargo[]     @relation("RCConsignee")
+  tripsAsShipper      Trip[]                     @relation("TripShipper")
+  tripsAsConsignee    Trip[]                     @relation("TripConsignee")
+  tripsAsPayer        Trip[]                     @relation("TripPayer")
+  tcuAsCustomer       TripCargoUnit[]            @relation("TCUCustomer")
+  tcuAsShipper        TripCargoUnit[]            @relation("TCUShipper")
+  requestsAsCustomer  CustomerRequest[]          @relation("ReqCustomer")
+  requestsAsShipper   CustomerRequest[]          @relation("ReqShipper")
+  requestsAsConsignee CustomerRequest[]          @relation("ReqConsignee")
+  requestsAsPayer     CustomerRequest[]          @relation("ReqPayer")
+  reqCargoAsConsignee RequestCargo[]             @relation("RCConsignee")
   acts                CustomerAct[]
   invoices            Invoice[]
   payments            Payment[]
@@ -197,16 +200,16 @@ model Customer {
 }
 
 model CustomerDeliveryLocation {
-  id           String         @id @default(cuid())
+  id           String        @id @default(cuid())
   customerId   String
   locationId   String
   tariffMethod TariffMethod?
-  tariffAmount Decimal?       @db.Decimal(10, 2)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  tariffAmount Decimal?      @db.Decimal(10, 2)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
-  customer Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  location Location  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   @@unique([customerId, locationId])
   @@index([customerId])
@@ -245,14 +248,15 @@ model Carrier {
   createdById   String?
   updatedById   String?
 
-  vehicles   Vehicle[]
-  drivers    Driver[]
-  directions Direction[] // направления, закреплённые за перевозчиком
-  contracts  CarrierContract[]
-  trips     Trip[]
-  acts      CarrierAct[]
-  invoices  Invoice[]
-  payments  Payment[]
+  vehicles      Vehicle[]
+  drivers       Driver[]
+  directions    Direction[] // направления, закреплённые за перевозчиком
+  contracts     CarrierContract[]
+  trips         Trip[]
+  acts          CarrierAct[]
+  invoices      Invoice[]
+  payments      Payment[]
+  planTemplates TripPlanTemplate[]
 }
 
 // Чистый справочник — без полей аудита (по ТЗ)
@@ -263,11 +267,12 @@ model VehicleType {
   capacityPallets Int?
   isRefrigerator  Boolean  @default(false)
 
-  vehicles     Vehicle[]
-  tariffs      Tariff[]
-  marketPrices MarketPrice[]
-  trips        Trip[]        @relation("TripVehicleType")
-  tariffTiers  TariffTier[]
+  vehicles      Vehicle[]
+  tariffs       Tariff[]
+  marketPrices  MarketPrice[]
+  trips         Trip[]             @relation("TripVehicleType")
+  tariffTiers   TariffTier[]
+  planTemplates TripPlanTemplate[]
 }
 
 model AdditionalService {
@@ -331,10 +336,10 @@ model CustomerContract {
   createdById    String?
   updatedById    String?
 
-  customer Customer                  @relation(fields: [customerId], references: [id])
-  tariffs  Tariff[]                  @relation("CustContractTariff")
-  acts     CustomerAct[]
-  members  CustomerContractMember[]
+  customer  Customer                 @relation(fields: [customerId], references: [id])
+  tariffs   Tariff[]                 @relation("CustContractTariff")
+  acts      CustomerAct[]
+  members   CustomerContractMember[]
   schedules DirectionSchedule[]
 }
 
@@ -349,7 +354,7 @@ model CustomerContractMember {
 }
 
 model DirectionSchedule {
-  id                    String           @id @default(cuid())
+  id                    String    @id @default(cuid())
   customerContractId    String
   directionId           String?
   originLocationId      String?
@@ -366,8 +371,8 @@ model DirectionSchedule {
   // Правка не меняет строку на месте, а закрывает её validTo и создаёт новую.
   validFrom             DateTime
   validTo               DateTime?
-  createdAt             DateTime         @default(now())
-  updatedAt             DateTime         @updatedAt
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   customerContract    CustomerContract @relation(fields: [customerContractId], references: [id], onDelete: Cascade)
   direction           Direction?       @relation(fields: [directionId], references: [id])
@@ -432,7 +437,7 @@ model Tariff {
   vehicleType         VehicleType?      @relation(fields: [vehicleTypeCode], references: [code])
   originLocation      Location?         @relation("TariffOrigin", fields: [originLocationId], references: [id])
   destinationLocation Location?         @relation("TariffDestination", fields: [destinationLocationId], references: [id])
-  tiers            TariffTier[]
+  tiers               TariffTier[]
 }
 
 model TariffTier {
@@ -478,13 +483,13 @@ enum SplitMode {
 }
 
 model Direction {
-  id            String    @id @default(cuid())
-  code          String    @unique
+  id            String   @id @default(cuid())
+  code          String   @unique
   name          String?
-  distanceKm    Decimal?  @db.Decimal(10, 2)
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  distanceKm    Decimal? @db.Decimal(10, 2)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
   createdById   String?
   updatedById   String?
   originId      String?
@@ -495,9 +500,9 @@ model Direction {
   // Перевозчик: одно направление — один перевозчик. Живёт здесь и не
   // версионируется: у Trip своё carrierId, оно копируется при создании рейса,
   // поэтому смена перевозчика в справочнике не переписывает историю.
-  carrierId String?
+  carrierId            String?
   // Режим набивки. Пусто = направление не настроено, автопланирование его не берёт.
-  splitMode SplitMode?
+  splitMode            SplitMode?
   //
   // ЧЕЙ РЕЙС ЗАБИРАЕТ ГРУЗ ЭТОГО НАПРАВЛЕНИЯ С ПРОИЗВОДСТВА.
   // Пусто = свой собственный рейс. Заполнено = заборное плечо (производство →
@@ -516,18 +521,19 @@ model Direction {
   // перевозчика в тарифах только восьмипаллетки, фуры взяться неоткуда.
   // Вместимость каждого типа — из VehicleType.capacityPallets, в тарифе её нет.
 
-  origin      Location? @relation("DirectionOrigin", fields: [originId], references: [id])
-  destination Location? @relation("DirectionDestination", fields: [destinationId], references: [id])
-  carrier     Carrier?  @relation(fields: [carrierId], references: [id])
+  origin              Location?             @relation("DirectionOrigin", fields: [originId], references: [id])
+  destination         Location?             @relation("DirectionDestination", fields: [destinationId], references: [id])
+  carrier             Carrier?              @relation(fields: [carrierId], references: [id])
   // Self-relation: чей рейс забирает груз с производства (см. поле выше).
-  pickupViaDirection  Direction?  @relation("DirectionPickupVia", fields: [pickupViaDirectionId], references: [id])
-  pickupForDirections Direction[] @relation("DirectionPickupVia")
-  trips         Trip[]
-  tariffs       Tariff[]
-  marketPrices  MarketPrice[]
-  legs          RequestCargoLeg[]
-  schedules     DirectionSchedule[]
-  stops         RouteStop[]
+  pickupViaDirection  Direction?            @relation("DirectionPickupVia", fields: [pickupViaDirectionId], references: [id])
+  pickupForDirections Direction[]           @relation("DirectionPickupVia")
+  trips               Trip[]
+  tariffs             Tariff[]
+  marketPrices        MarketPrice[]
+  legs                RequestCargoLeg[]
+  schedules           DirectionSchedule[]
+  stops               RouteStop[]
+  planTemplateLegs    TripPlanTemplateLeg[]
 
   @@map("Route")
 }
@@ -542,7 +548,7 @@ model RouteStop {
   id          String   @id @default(cuid())
   directionId String
   locationId  String
-  position    Int      // порядок объезда, 1 = первый заезд
+  position    Int // порядок объезда, 1 = первый заезд
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -568,7 +574,7 @@ model Trip {
   // опираются на tripType, а у старых рейсов verticalCodes пуст.
   verticalCodes    String[]
   verticalCode     String?
-  directionId      String?  @map("routeId")
+  directionId      String?    @map("routeId")
   originId         String?
   destinationId    String?
   vehicleTypeCode  String?
@@ -595,17 +601,17 @@ model Trip {
   createdById      String?
   updatedById      String?
 
-  vertical    Vertical?   @relation(fields: [verticalCode], references: [code])
-  direction   Direction?  @relation(fields: [directionId], references: [id])
-  origin       Location?    @relation("TripOrigin", fields: [originId], references: [id])
-  destination  Location?    @relation("TripDestination", fields: [destinationId], references: [id])
-  vehicleType  VehicleType? @relation("TripVehicleType", fields: [vehicleTypeCode], references: [code])
-  vehicle      Vehicle?     @relation(fields: [vehicleId], references: [id])
-  driver      Driver?   @relation(fields: [driverId], references: [id])
-  carrier     Carrier?  @relation(fields: [carrierId], references: [id])
-  shipper     Customer? @relation("TripShipper", fields: [shipperId], references: [id])
-  consignee   Customer? @relation("TripConsignee", fields: [consigneeId], references: [id])
-  payer       Customer? @relation("TripPayer", fields: [payerId], references: [id])
+  vertical    Vertical?    @relation(fields: [verticalCode], references: [code])
+  direction   Direction?   @relation(fields: [directionId], references: [id])
+  origin      Location?    @relation("TripOrigin", fields: [originId], references: [id])
+  destination Location?    @relation("TripDestination", fields: [destinationId], references: [id])
+  vehicleType VehicleType? @relation("TripVehicleType", fields: [vehicleTypeCode], references: [code])
+  vehicle     Vehicle?     @relation(fields: [vehicleId], references: [id])
+  driver      Driver?      @relation(fields: [driverId], references: [id])
+  carrier     Carrier?     @relation(fields: [carrierId], references: [id])
+  shipper     Customer?    @relation("TripShipper", fields: [shipperId], references: [id])
+  consignee   Customer?    @relation("TripConsignee", fields: [consigneeId], references: [id])
+  payer       Customer?    @relation("TripPayer", fields: [payerId], references: [id])
 
   legs          TripLeg[]
   cargoUnits    TripCargoUnit[]
@@ -775,9 +781,9 @@ model CustomerRequest {
   createdById        String?
   updatedById        String?
 
-  parentRequestId  String?
-  parent           CustomerRequest?  @relation("RequestGroup", fields: [parentRequestId], references: [id], onDelete: SetNull)
-  groupChildren    CustomerRequest[] @relation("RequestGroup")
+  parentRequestId String?
+  parent          CustomerRequest?  @relation("RequestGroup", fields: [parentRequestId], references: [id], onDelete: SetNull)
+  groupChildren   CustomerRequest[] @relation("RequestGroup")
 
   customer         Customer       @relation("ReqCustomer", fields: [customerId], references: [id])
   payer            Customer?      @relation("ReqPayer", fields: [payerId], references: [id])
@@ -929,28 +935,28 @@ model ActTripLink {
 }
 
 model Invoice {
-  id            String           @id @default(cuid())
-  invoiceNumber String
-  invoiceDate   DateTime
-  direction     InvoiceDirection
-  customerId    String?
-  carrierId     String?
-  customerActId String?
-  carrierActId  String?
-  requestId     String?
-  tripId        String?
+  id                   String           @id @default(cuid())
+  invoiceNumber        String
+  invoiceDate          DateTime
+  direction            InvoiceDirection
+  customerId           String?
+  carrierId            String?
+  customerActId        String?
+  carrierActId         String?
+  requestId            String?
+  tripId               String?
   carrierInvoiceNumber String?
-  amount        Decimal          @db.Decimal(14, 2)
-  vatAmount     Decimal?         @db.Decimal(14, 2)
-  total         Decimal          @db.Decimal(14, 2)
-  dueDate       DateTime?
-  status        InvoiceStatus    @default(ISSUED)
-  fileUrl       String?
-  notes         String?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  createdById   String?
-  updatedById   String?
+  amount               Decimal          @db.Decimal(14, 2)
+  vatAmount            Decimal?         @db.Decimal(14, 2)
+  total                Decimal          @db.Decimal(14, 2)
+  dueDate              DateTime?
+  status               InvoiceStatus    @default(ISSUED)
+  fileUrl              String?
+  notes                String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  createdById          String?
+  updatedById          String?
 
   customer    Customer?        @relation(fields: [customerId], references: [id])
   carrier     Carrier?         @relation(fields: [carrierId], references: [id])
@@ -1048,27 +1054,87 @@ model TripTemplate {
   updatedById String?
 }
 
-// Грузы заявки (строки): точки забора/выгрузки, плановые даты, стоимость/скидка/итого
-model RequestCargo {
-  id              String           @id @default(cuid())
-  requestId       String
-  consigneeId             String?
-  consigneeLocationId     String?
-  unitType                CargoUnitType    @default(PALLET)
-  pallets         Int?
-  traysCount      Int?
-  weightKg        Decimal?         @db.Decimal(10, 2)
-  productCategory ProductCategory?
-  tempRegime      TempRegime?
-  pricingMode     CargoPricingMode @default(CARGO)
-  cost            Decimal?         @db.Decimal(12, 2)
-  discount        Decimal?         @db.Decimal(12, 2)
-  finalCost       Decimal?         @db.Decimal(12, 2)
+// ============================================================
+//  ШАБЛОН РЕЙСА ДЛЯ АВТОПЛАНА (жёсткий каркас одной машины)
+// ============================================================
+//
+// Одна запись = одна машина с ФИКСИРОВАННЫМ набором плеч. День ото дня меняются
+// только дата и количество паллет — состав точек задан заранее. Автоплан на дату
+// берёт заявочные плечи, совпадающие со слотом ПО ОБЕИМ ТОЧКАМ (забор+выгрузка),
+// собирает их в один рейс. Перебор вместимости НЕ блокирует создание (создаётся с
+// флагом), деление на две машины автоматом не делается — это ручная работа логиста.
+//
+// Проход по шаблонам идёт ПЕРВЫМ и добавочно: он забирает свои плечи, а всё
+// остальное дораспределяет старый автоплан по направлениям (Direction.carrierId +
+// splitMode + тариф). Так Казань и прочие рабочие направления не ломаются, а
+// шаблон спасает то, что сейчас выпадает — забор с производств (MSK-MSK без
+// перевозчика).
+model TripPlanTemplate {
+  id              String   @id @default(cuid())
+  name            String   @unique
+  carrierId       String
+  vehicleTypeCode String // вместимость берётся из VehicleType.capacityPallets
+  isActive        Boolean  @default(true)
   notes           String?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
   createdById     String?
   updatedById     String?
+
+  carrier     Carrier               @relation(fields: [carrierId], references: [id])
+  vehicleType VehicleType           @relation(fields: [vehicleTypeCode], references: [code])
+  legs        TripPlanTemplateLeg[]
+
+  @@index([carrierId])
+}
+
+// Слот шаблона — одно фиксированное плечо: пара точек забор→выгрузка.
+model TripPlanTemplateLeg {
+  id                String  @id @default(cuid())
+  templateId        String
+  position          Int // порядок объезда в маршруте, 1 = первый
+  pickupLocationId  String
+  dropoffLocationId String
+  directionId       String? // опционально: для тарифа/группировки
+  // Конечная точка груза — третий ключ матча. Одно и то же заборное плечо
+  // (Йуми → КД Север) едет разным клиентам; по паре точек их не различить,
+  // поэтому слот уточняет, ЧЕЙ забор он берёт: пусто = любой, заполнено =
+  // только груз с этой конечной точкой. Так забор Йуми делится между машиной
+  // Пятёрочки (конечные Пятёрочка/Казань) и машиной Нижнего (Нижний/Воронеж).
+  finalLocationId   String?
+
+  template        TripPlanTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  pickupLocation  Location         @relation("TPTLegPickup", fields: [pickupLocationId], references: [id])
+  dropoffLocation Location         @relation("TPTLegDropoff", fields: [dropoffLocationId], references: [id])
+  finalLocation   Location?        @relation("TPTLegFinal", fields: [finalLocationId], references: [id])
+  direction       Direction?       @relation(fields: [directionId], references: [id])
+
+  @@unique([templateId, position])
+  @@index([templateId])
+  @@index([pickupLocationId, dropoffLocationId])
+}
+
+// Грузы заявки (строки): точки забора/выгрузки, плановые даты, стоимость/скидка/итого
+model RequestCargo {
+  id                  String           @id @default(cuid())
+  requestId           String
+  consigneeId         String?
+  consigneeLocationId String?
+  unitType            CargoUnitType    @default(PALLET)
+  pallets             Int?
+  traysCount          Int?
+  weightKg            Decimal?         @db.Decimal(10, 2)
+  productCategory     ProductCategory?
+  tempRegime          TempRegime?
+  pricingMode         CargoPricingMode @default(CARGO)
+  cost                Decimal?         @db.Decimal(12, 2)
+  discount            Decimal?         @db.Decimal(12, 2)
+  finalCost           Decimal?         @db.Decimal(12, 2)
+  notes               String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  createdById         String?
+  updatedById         String?
 
   request           CustomerRequest   @relation(fields: [requestId], references: [id], onDelete: Cascade)
   consignee         Customer?         @relation("RCConsignee", fields: [consigneeId], references: [id])
@@ -1141,18 +1207,18 @@ model RequestTemplate {
 
 // Журнал прогонов импорта: проверка почты, OCR, парсинг, создание заявок.
 model ImportLog {
-  id             String         @id @default(cuid())
-  createdAt      DateTime       @default(now())
-  trigger        ImportTrigger  // как запущено: вручную / крон
+  id             String        @id @default(cuid())
+  createdAt      DateTime      @default(now())
+  trigger        ImportTrigger // как запущено: вручную / крон
   customerId     String?
-  source         String?        // имя файла / тема письма / message-id
-  status         ImportStatus   // итог прогона
-  stage          String?        // где остановились: mail | ocr | parse | create
+  source         String? // имя файла / тема письма / message-id
+  status         ImportStatus // итог прогона
+  stage          String? // где остановились: mail | ocr | parse | create
   ocrChars       Int?
-  createdCount   Int            @default(0)
-  createdNumbers String[]       // номера созданных заявок
-  message        String?        // краткое человекочитаемое резюме
-  details        Json?          // полный результат: извлечённые данные, warnings, errors, skipped
+  createdCount   Int           @default(0)
+  createdNumbers String[] // номера созданных заявок
+  message        String? // краткое человекочитаемое резюме
+  details        Json? // полный результат: извлечённые данные, warnings, errors, skipped
   createdById    String?
 
   customer Customer? @relation(fields: [customerId], references: [id])
@@ -1167,8 +1233,8 @@ enum ImportTrigger {
 }
 
 enum ImportStatus {
-  SUCCESS   // созданы заявки
-  PARTIAL   // часть создана, часть с ошибками
-  EMPTY     // писем/заявок к созданию нет (или все дубли)
-  ERROR     // ошибка почты/OCR/парсинга — ничего не создано
+  SUCCESS // созданы заявки
+  PARTIAL // часть создана, часть с ошибками
+  EMPTY // писем/заявок к созданию нет (или все дубли)
+  ERROR // ошибка почты/OCR/парсинга — ничего не создано
 }
