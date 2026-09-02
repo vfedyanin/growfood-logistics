@@ -64,7 +64,7 @@ const menuItems: MenuItem[] = [
     getItem('Транспорт', '/references/vehicles', <ContainerOutlined />),
     getItem('Водители', '/references/drivers', <IdcardOutlined />),
     getItem('Направления', '/references/directions', <NodeIndexOutlined />),
-    getItem('Шаблоны рейсов', '/references/trip-plan-templates', <SnippetsOutlined />),
+    getItem('Шаблоны автоплана', '/references/trip-plan-templates', <SnippetsOutlined />),
     getItem('Договоры (клиенты)', '/references/customer-contracts', <FileTextOutlined />),
     getItem('Договоры (перевозчики)', '/references/carrier-contracts', <FileTextOutlined />),
     getItem('Тариф (НЕ РАБОТАЕТ)', '/references/tariffs', <CreditCardOutlined />),
