@@ -210,33 +210,54 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
 /**
  * Счётчик нераспределённых плеч по дням недели для сетки планирования.
  *
- * Два числа на день намеренно: плеч без направления в базе больше двух третей,
- * и одним числом счётчик был бы красным всегда. `total - noDirection` — то, что
- * автоматика должна была разложить, вот это и есть сигнал.
+ * ЧЕСТНОЕ число: сколько плеч реально уедет автопланом и сколько останется
+ * логисту. Раньше счётчик делил плечи по признаку «есть направление» —
+ * но наличие направления ≠ распределится: у MSK-MSK/SPB направление есть, а
+ * перевозчика или тарифа нет, автоплан их не берёт, и число врало.
+ *
+ * Единственный источник правды — сам `computeAutoPlan`: гоняем его на каждый
+ * день, `willPlan` — сумма плеч в его рейсах (шаблоны + направления с тарифом),
+ * `willRemain` — всё остальное. Так счётчик не может разойтись с тем, что
+ * действительно сделает кнопка «Распределить».
  */
 export async function getUnassignedByDay(weekStartISO: string) {
   const weekStart = new Date(weekStartISO.slice(0, 10) + 'T00:00:00.000Z');
   const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
 
+  // Паллеты по дням — одним лёгким запросом на неделю (computeAutoPlan суммарные
+  // паллеты не возвращает, а показывать их в подсказке надо).
   const legs = await prisma.requestCargoLeg.findMany({
     where: { plannedPickup: { gte: weekStart, lt: weekEnd }, tripCargoUnitId: null },
-    select: { plannedPickup: true, directionId: true, cargo: { select: { pallets: true } } },
+    select: { plannedPickup: true, cargo: { select: { pallets: true } } },
   });
-
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart.getTime() + i * 86400000);
-    return { date: d.toISOString().slice(0, 10), total: 0, noDirection: 0, pallets: 0 };
-  });
+  const palletsByDay = new Map<string, number>();
   for (const l of legs) {
     if (!l.plannedPickup) continue;
     const key = l.plannedPickup.toISOString().slice(0, 10);
-    const slot = days.find((d) => d.date === key);
-    if (!slot) continue;
-    slot.total++;
-    slot.pallets += l.cargo.pallets ?? 0;
-    if (!l.directionId) slot.noDirection++;
+    palletsByDay.set(key, (palletsByDay.get(key) ?? 0) + (l.cargo.pallets ?? 0));
   }
-  return days;
+
+  const dates = Array.from({ length: 7 }, (_, i) =>
+    new Date(weekStart.getTime() + i * 86400000).toISOString().slice(0, 10),
+  );
+
+  const plans = await Promise.all(dates.map((d) => computeAutoPlan(d)));
+
+  return dates.map((date, i) => {
+    const plan = plans[i];
+    const total = plan.unassignedLegs;
+    const willPlan = plan.trips.reduce((s, t) => s + t.legIds.length, 0);
+    const palletsPlanned = plan.trips.reduce((s, t) => s + t.pallets, 0);
+    const pallets = palletsByDay.get(date) ?? 0;
+    return {
+      date,
+      total,
+      willPlan,
+      willRemain: total - willPlan,
+      pallets,
+      palletsRemain: pallets - palletsPlanned,
+    };
+  });
 }
 
 /** Считает и сразу создаёт рейсы. Возвращает то же, что расчёт, плюс номера рейсов. */

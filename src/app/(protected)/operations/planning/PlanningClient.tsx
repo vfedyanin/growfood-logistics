@@ -126,11 +126,13 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
     }
   }
 
-  // Автораспределение плеч по рейсам. Счётчик показывает два числа на день:
-  // всего нераспределённых плеч и сколько из них без направления. Одним числом он
-  // был бы красным всегда — плеч без направления в базе больше двух третей, и
-  // автоматика их не берёт намеренно, это ручная работа логиста.
-  const [counts, setCounts] = useState<{ date: string; total: number; noDirection: number; pallets: number }[]>([]);
+  // Автораспределение плеч по рейсам. Счётчик показывает на день два ЧЕСТНЫХ
+  // числа: сколько плеч останется логисту вручную (willRemain) и сколько уедет
+  // автопланом (willPlan). Оба считает сам computeAutoPlan, поэтому цифры не
+  // расходятся с тем, что делает кнопка «Распределить». Раньше делили по признаку
+  // «есть направление», и число врало: у части плеч направление есть, а
+  // перевозчика/тарифа нет — автоплан их не берёт.
+  const [counts, setCounts] = useState<{ date: string; total: number; willPlan: number; willRemain: number; pallets: number; palletsRemain: number }[]>([]);
   const [planDate, setPlanDate] = useState(() => dayjs().add(1, 'day'));
   const [planLoading, setPlanLoading] = useState(false);
   const [planResult, setPlanResult] = useState<any>(null);
@@ -420,19 +422,21 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
       </div>
 
       {/* Нераспределённые плечи по дням: сколько работы осталось на каждый день.
-          Два числа намеренно — см. комментарий у loadCounts. */}
+          Основное число — сколько останется логисту вручную (willRemain), серым —
+          сколько уедет автопланом (willPlan). См. комментарий у counts. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <Text type="secondary" style={{ fontSize: 12 }}>Не распределено:</Text>
         {weekDates.map((d, i) => {
           const c = counts.find((x) => x.date === d.format('YYYY-MM-DD'));
           const total = c?.total ?? 0;
-          const auto = total - (c?.noDirection ?? 0); // то, что должна была разложить автоматика
+          const willPlan = c?.willPlan ?? 0;   // уедет автопланом одной кнопкой
+          const willRemain = c?.willRemain ?? 0; // останется логисту вручную
           const isToday = d.format('YYYY-MM-DD') === todayStr;
           return (
             <Tooltip
               key={d.format('YYYY-MM-DD')}
               title={total
-                ? `${total} плеч на ${c?.pallets ?? 0} палл. Из них ${auto} с направлением — их берёт автораспределение, ${c?.noDirection ?? 0} без направления — только вручную.`
+                ? `${total} плеч на ${c?.pallets ?? 0} палл. Автоплан возьмёт ${willPlan}, останется логисту вручную ${willRemain} (${c?.palletsRemain ?? 0} палл.) — нет перевозчика, шаблона или тарифа.`
                 : 'все плечи этого дня привязаны к рейсам'}
             >
               <span style={{
@@ -445,8 +449,8 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
                 {total === 0
                   ? <span style={{ color: '#52c41a' }}>—</span>
                   : <>
-                      <span style={{ fontWeight: 600, color: auto > 0 ? '#d4380d' : '#595959' }}>{auto}</span>
-                      <span style={{ color: '#bfbfbf' }}>+{c?.noDirection ?? 0}</span>
+                      <span style={{ fontWeight: 600, color: willRemain > 0 ? '#d4380d' : '#595959' }}>{willRemain}</span>
+                      {willPlan > 0 && <span style={{ color: '#bfbfbf' }}>+{willPlan}⚙</span>}
                     </>}
               </span>
             </Tooltip>
