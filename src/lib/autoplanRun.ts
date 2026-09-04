@@ -162,14 +162,19 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
     byDirection.get(l.directionId)!.push(l);
   }
 
+  // Направления остатка тянем ОДНИМ запросом, не по одному в цикле: иначе N+1,
+  // а этот расчёт гоняется ещё и счётчиком нераспределённых на всю неделю.
+  const dirRows = await prisma.direction.findMany({
+    where: { id: { in: Array.from(byDirection.keys()) } },
+    select: {
+      id: true, code: true, originId: true, destinationId: true,
+      splitMode: true, carrierId: true, carrier: { select: { name: true } },
+    },
+  });
+  const dirById = new Map(dirRows.map((d) => [d.id, d]));
+
   for (const [directionId, dirLegs] of Array.from(byDirection.entries())) {
-    const dir = await prisma.direction.findUnique({
-      where: { id: directionId },
-      select: {
-        id: true, code: true, originId: true, destinationId: true,
-        splitMode: true, carrierId: true, carrier: { select: { name: true } },
-      },
-    });
+    const dir = dirById.get(directionId);
     if (!dir) continue;
     const items = dirLegs.map((l) => ({ legId: l.id, pallets: l.cargo.pallets ?? 0 }));
 
