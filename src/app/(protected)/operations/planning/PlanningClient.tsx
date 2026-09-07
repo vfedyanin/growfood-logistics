@@ -157,6 +157,23 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
     }
   }
 
+  // Пересбор одного направления. Тот же пересбор, что и общий, но scope — одно
+  // направление: сносит свои черновые авторейсы этого направления за planDate и
+  // раскладывает заново. directionId берём из ключа группы (dir:<id>).
+  const [dirPlanning, setDirPlanning] = useState<string | null>(null);
+  async function handleAutoPlanDirection(directionId: string, title: string) {
+    setDirPlanning(directionId);
+    try {
+      const res = await applyAutoPlan(planDate.format('YYYY-MM-DD'), directionId);
+      message.success(`${title}: рейсов ${res.createdTripNumbers.length}, осталось ${res.unassignedLegs - res.trips.reduce((s, t) => s + t.legIds.length, 0)} плеч`);
+      await loadCounts(weekStart);
+    } catch (e) {
+      message.error('Не удалось распределить: ' + (e as Error).message);
+    } finally {
+      setDirPlanning(null);
+    }
+  }
+
   async function loadWeek(start: dayjs.Dayjs) {
     setLoading(true);
     const s = start.startOf('isoWeek');
@@ -623,11 +640,27 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
             {group.subtitle && (
               <Text type="secondary" style={{ fontSize: 11 }}>{group.subtitle}</Text>
             )}
-            {!isExpanded && (
-              <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
-                {group.rows.length} {group.rows.length === 1 ? 'строка' : group.rows.length < 5 ? 'строки' : 'строк'}
-              </Text>
-            )}
+            {/* Правый блок: кнопка пересбора этого направления + счётчик строк.
+                stopPropagation, чтобы клик по кнопке не сворачивал группу. */}
+            <span
+              style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {group.key.startsWith('dir:') && (
+                <Button
+                  size="small"
+                  loading={dirPlanning === group.key.slice(4)}
+                  onClick={() => handleAutoPlanDirection(group.key.slice(4), group.title)}
+                >
+                  Распределить {planDate.format('DD.MM')}
+                </Button>
+              )}
+              {!isExpanded && (
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {group.rows.length} {group.rows.length === 1 ? 'строка' : group.rows.length < 5 ? 'строки' : 'строк'}
+                </Text>
+              )}
+            </span>
           </div>
           <div style={{ overflowX: 'auto', display: isExpanded ? undefined : 'none' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>

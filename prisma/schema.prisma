@@ -595,6 +595,11 @@ model Trip {
   actualCost       Decimal?   @db.Decimal(12, 2)
   vatRatePct       Int?       @default(0)
   status           TripStatus @default(DRAFT)
+  // Рейс создан автопланом (true) либо вручную/из шаблона рейса (false). Нужно
+  // для идемпотентного пересбора: повторный запуск «Распределить» сносит и
+  // раскладывает заново ТОЛЬКО свои черновые авторейсы (status=DRAFT), не трогая
+  // ручные и всё, что уже не DRAFT (в пути/подтверждено).
+  autoPlanned      Boolean    @default(false)
   notes            String?
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
