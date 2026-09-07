@@ -114,18 +114,8 @@ export function buildRouteSheet(trip: any, orderMap: Map<string, number>): Route
     touch(leg.dropoffLocationId, leg.dropoffLocation, dropoffAt, 'unload');
   }
 
-  // Порядок точек: ручной stopOrder → позиция в маршруте направления → загрузки
-  // раньше выгрузок → время. Тайбрейк «загрузка раньше выгрузки» нужен для
-  // забор-рейсов: у них нет направления, значит нет и RouteStop, все точки
-  // получают одинаковую позицию, и сортировка падала на время. А по времени
-  // выгрузка на общем хабе (первый груз пришёл в 16:00) вставала МЕЖДУ заборами
-  // (второй забор в 18:00) — физически нельзя выгрузить не загруженное. Точка,
-  // где есть погрузка, всегда раньше точки, где только выгрузка. На магистрали с
-  // прописанным RouteStop позиции разные, и этот тайбрейк не включается.
-  const loadRank = (s: StopAcc) => (s.load.length > 0 ? 0 : 1);
   const stops = Array.from(map.values()).sort(
-    (a, b) =>
-      a.orderKey - b.orderKey || a.pos - b.pos || loadRank(a) - loadRank(b) || a.sortKey - b.sortKey,
+    (a, b) => a.orderKey - b.orderKey || a.pos - b.pos || a.sortKey - b.sortKey,
   );
 
   // Всего паллет по рейсу — сумма погруженного, а не сумма по всем точкам:
