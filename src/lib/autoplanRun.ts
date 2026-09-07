@@ -57,13 +57,24 @@ export type AutoPlanResult = {
   legsWithoutDirection: number;
 };
 
-export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> {
+/**
+ * @param directionId если задан — раскладываем ТОЛЬКО это направление (кнопка
+ *   «Распределить» у группы направления). Проход по шаблонам при этом пропускаем:
+ *   шаблоны — про забор с производства и не привязаны к одному направлению, они
+ *   работают только в общем прогоне. Без directionId — полный двухпроходный
+ *   автоплан, как раньше.
+ */
+export async function computeAutoPlan(dateISO: string, directionId?: string | null): Promise<AutoPlanResult> {
 
   const day = new Date(dateISO.slice(0, 10) + 'T00:00:00.000Z');
   const dayEnd = new Date(day.getTime() + 86400000);
 
   const legs = await prisma.requestCargoLeg.findMany({
-    where: { plannedPickup: { gte: day, lt: dayEnd }, tripCargoUnitId: null },
+    where: {
+      plannedPickup: { gte: day, lt: dayEnd },
+      tripCargoUnitId: null,
+      ...(directionId ? { directionId } : {}),
+    },
     select: {
       id: true, directionId: true, pickupLocationId: true, dropoffLocationId: true,
       plannedPickup: true, plannedDropoff: true,
@@ -95,14 +106,16 @@ export async function computeAutoPlan(dateISO: string): Promise<AutoPlanResult> 
   const consumed = new Set<string>();
   const palletsOf = (l: (typeof legs)[number]) => l.cargo.pallets ?? 0;
 
-  const templates = await prisma.tripPlanTemplate.findMany({
-    where: { isActive: true },
-    include: {
-      carrier: { select: { name: true } },
-      vehicleType: { select: { capacityPallets: true } },
-      legs: { orderBy: { position: 'asc' } },
-    },
-  });
+  const templates = directionId
+    ? [] // прогон по одному направлению — шаблоны (заборы) не трогаем
+    : await prisma.tripPlanTemplate.findMany({
+        where: { isActive: true },
+        include: {
+          carrier: { select: { name: true } },
+          vehicleType: { select: { capacityPallets: true } },
+          legs: { orderBy: { position: 'asc' } },
+        },
+      });
 
   for (const tpl of templates) {
     if (!tpl.legs.length) continue;
@@ -265,9 +278,50 @@ export async function getUnassignedByDay(weekStartISO: string) {
   });
 }
 
-/** Считает и сразу создаёт рейсы. Возвращает то же, что расчёт, плюс номера рейсов. */
-export async function applyAutoPlan(dateISO: string, actor: string | null) {
-  const plan = await computeAutoPlan(dateISO);
+/**
+ * Считает и сразу создаёт рейсы. Идемпотентно: сперва СНОСИТ свои прежние
+ * авторейсы этого дня (в рамках scope), потом раскладывает заново — повторный
+ * запуск не плодит дубли, а пересобирает. Возвращает расчёт плюс номера рейсов.
+ *
+ * @param directionId scope пересбора и раскладки: одно направление (кнопка у
+ *   группы) либо весь день (общая кнопка, directionId не задан).
+ *
+ * Что сносим: только `status=DRAFT AND autoPlanned=true` в scope. Ручные рейсы и
+ * всё не-DRAFT (в пути/подтверждено) не трогаем. ВНИМАНИЕ: если логист вручную
+ * поправил черновой авторейс — пересбор его тоже снесёт (осознанное решение
+ * заказчика: «создаёт всё по новой»).
+ */
+export async function applyAutoPlan(dateISO: string, actor: string | null, directionId?: string | null) {
+  const day = new Date(dateISO.slice(0, 10) + 'T00:00:00.000Z');
+  const dayEnd = new Date(day.getTime() + 86400000);
+
+  // ── ПЕРЕСБОР: сносим прежние авторейсы этого дня/направления ─────────────────
+  // День рейса определяем по забору его плеч (у рейса нет отдельного поля даты).
+  // Общий прогон (без directionId) сносит и шаблонные заборные рейсы тоже
+  // (directionId у них пуст) — фильтра по направлению нет.
+  const doomed = await prisma.trip.findMany({
+    where: {
+      status: 'DRAFT',
+      autoPlanned: true,
+      ...(directionId ? { directionId } : {}),
+      cargoUnits: { some: { requestCargoLeg: { plannedPickup: { gte: day, lt: dayEnd } } } },
+    },
+    select: { id: true },
+  });
+  const tripIds = doomed.map((t) => t.id);
+  if (tripIds.length) {
+    // Плечи освобождаем ЯВНО (обнуляем tripCargoUnitId), затем удаляем рейсы —
+    // грузовые единицы уйдут каскадом (TripCargoUnit.trip onDelete: Cascade).
+    await prisma.$transaction([
+      prisma.requestCargoLeg.updateMany({
+        where: { tripCargoUnit: { tripId: { in: tripIds } } },
+        data: { tripCargoUnitId: null },
+      }),
+      prisma.trip.deleteMany({ where: { id: { in: tripIds } } }),
+    ]);
+  }
+
+  const plan = await computeAutoPlan(dateISO, directionId);
   const created: string[] = [];
 
   for (const t of plan.trips) {
@@ -329,6 +383,7 @@ export async function applyAutoPlan(dateISO: string, actor: string | null) {
         plannedDeparture: t.plannedDeparture,
         plannedArrival: t.plannedArrival,
         status: 'DRAFT',
+        autoPlanned: true,
         createdById: actor,
         updatedById: actor,
       },

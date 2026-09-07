@@ -9,9 +9,9 @@ import * as run from '@/lib/autoplanRun';
 
 const W: RoleName[] = ['LOGISTICS_MANAGER', 'LAAS_MANAGER', 'OWN_DISPATCHER'];
 
-export async function computeAutoPlan(dateISO: string) {
+export async function computeAutoPlan(dateISO: string, directionId?: string | null) {
   await requireAuth();
-  return run.computeAutoPlan(dateISO);
+  return run.computeAutoPlan(dateISO, directionId);
 }
 
 export async function getUnassignedByDay(weekStartISO: string) {
@@ -19,10 +19,10 @@ export async function getUnassignedByDay(weekStartISO: string) {
   return run.getUnassignedByDay(weekStartISO);
 }
 
-export async function applyAutoPlan(dateISO: string) {
+export async function applyAutoPlan(dateISO: string, directionId?: string | null) {
   await requireRole(W);
   const actor = await getActorId();
-  const res = await run.applyAutoPlan(dateISO, actor);
+  const res = await run.applyAutoPlan(dateISO, actor, directionId);
   revalidatePath('/operations/trips');
   revalidatePath('/operations/cargo');
   revalidatePath('/operations/planning');
