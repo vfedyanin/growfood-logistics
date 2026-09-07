@@ -58,14 +58,30 @@ const TEMP_LABEL: Record<string, string> = {
 export const tempLabel = (code: string | null | undefined) =>
   code ? TEMP_LABEL[code] ?? code : null;
 
-type StopAcc = SheetStop & { orderKey: number; pos: number; sortKey: number };
+// Одно действие на точке: погрузка или выгрузка конкретного груза.
+type StopEvent = {
+  locationId: string;
+  loc: any;
+  kind: 'load' | 'unload';
+  at: number; // ключ сортировки по времени
+  stamp: Date | null; // фактическое время для показа
+  cargo: SheetCargo;
+  ord: number; // ручной stopOrder
+  pos: number; // позиция в маршруте направления
+};
 
 /**
  * @param trip рейс со связями (carrier, direction, vehicleType, vehicle, driver)
  * @param orderMap позиция локации в маршруте направления: locationId → position
  */
 export function buildRouteSheet(trip: any, orderMap: Map<string, number>): RouteSheet {
-  const map = new Map<string, StopAcc>();
+  // Собираем ОТДЕЛЬНЫЕ действия, а не сразу точки: одна и та же локация может
+  // встретиться в маршруте несколько раз. Рейс-забор бывает шаттлом — не всё
+  // влезает в машину, поэтому она едет забор1 → хаб (выгрузить) → забор2 → снова
+  // хаб. Если склеивать по локации, оба визита хаба сливаются в один, выгрузка
+  // всплывает между заборами и лист врёт. Поэтому визиты не склеиваем: объединяем
+  // только ПОДРЯД идущие действия на одной точке (один физический заезд).
+  const events: StopEvent[] = [];
 
   for (const u of trip.cargoUnits ?? []) {
     const leg = u.requestCargoLeg;
@@ -87,36 +103,54 @@ export function buildRouteSheet(trip: any, orderMap: Map<string, number>): Route
         clean(leg.dropoffLocation?.name),
     };
 
-    const touch = (locId: string, loc: any, at: number, kind: 'load' | 'unload') => {
+    const push = (locId: string, loc: any, at: number, stamp: any, kind: 'load' | 'unload') => {
       if (!locId || !loc) return;
-      if (!map.has(locId)) {
-        map.set(locId, {
-          locationId: locId,
-          name: clean(loc.name) ?? '—',
-          address: clean(loc.address),
-          time: null,
-          load: [],
-          unload: [],
-          orderKey: ord,
-          pos: orderMap.get(locId) ?? Number.MAX_SAFE_INTEGER,
-          sortKey: at,
-        });
-      }
-      const s = map.get(locId)!;
-      if (at < s.sortKey) s.sortKey = at;
-      if (ord < s.orderKey) s.orderKey = ord;
-      const stamp = kind === 'load' ? leg.plannedPickup : leg.plannedDropoff;
-      if (stamp && (!s.time || new Date(stamp) < s.time)) s.time = new Date(stamp);
-      s[kind].push(cargo);
+      events.push({
+        locationId: locId,
+        loc,
+        kind,
+        at,
+        stamp: stamp ? new Date(stamp) : null,
+        cargo,
+        ord,
+        pos: orderMap.get(locId) ?? Number.MAX_SAFE_INTEGER,
+      });
     };
 
-    touch(leg.pickupLocationId, leg.pickupLocation, pickupAt, 'load');
-    touch(leg.dropoffLocationId, leg.dropoffLocation, dropoffAt, 'unload');
+    push(leg.pickupLocationId, leg.pickupLocation, pickupAt, leg.plannedPickup, 'load');
+    push(leg.dropoffLocationId, leg.dropoffLocation, dropoffAt, leg.plannedDropoff, 'unload');
   }
 
-  const stops = Array.from(map.values()).sort(
-    (a, b) => a.orderKey - b.orderKey || a.pos - b.pos || a.sortKey - b.sortKey,
+  // Порядок действий: ручной stopOrder → позиция в маршруте направления → время
+  // → погрузка раньше выгрузки → локация (для детерминизма при полном совпадении).
+  events.sort(
+    (a, b) =>
+      a.ord - b.ord ||
+      a.pos - b.pos ||
+      a.at - b.at ||
+      (a.kind === b.kind ? 0 : a.kind === 'load' ? -1 : 1) ||
+      a.locationId.localeCompare(b.locationId),
   );
+
+  // Объединяем только соседние действия на одной точке — это один заезд. Смена
+  // локации у соседних действий = новый визит (в т.ч. повторный заезд на ту же).
+  const stops: SheetStop[] = [];
+  for (const ev of events) {
+    let last = stops[stops.length - 1];
+    if (!last || last.locationId !== ev.locationId) {
+      last = {
+        locationId: ev.locationId,
+        name: clean(ev.loc.name) ?? '—',
+        address: clean(ev.loc.address),
+        time: null,
+        load: [],
+        unload: [],
+      };
+      stops.push(last);
+    }
+    last[ev.kind].push(ev.cargo);
+    if (ev.stamp && (!last.time || ev.stamp < last.time)) last.time = ev.stamp;
+  }
 
   // Всего паллет по рейсу — сумма погруженного, а не сумма по всем точкам:
   // иначе каждый груз посчитается дважды, на погрузке и на выгрузке.
@@ -139,7 +173,6 @@ export function buildRouteSheet(trip: any, orderMap: Map<string, number>): Route
     plannedDeparture: trip.plannedDeparture ? new Date(trip.plannedDeparture) : null,
     plannedArrival: trip.plannedArrival ? new Date(trip.plannedArrival) : null,
     totalPallets,
-    // служебные ключи сортировки наружу не отдаём
-    stops: stops.map(({ orderKey: _o, pos: _p, sortKey: _s, ...s }) => s),
+    stops,
   };
 }
