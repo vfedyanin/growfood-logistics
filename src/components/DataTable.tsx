@@ -38,7 +38,7 @@ export default function DataTable<T extends Record<string, any>>({
   searchPlaceholder = 'Поиск...',
   title,
   toolbar,
-  pageSize = 20,
+  pageSize = 50,
   scrollX = 800,
   size = 'middle',
   rowSelection,

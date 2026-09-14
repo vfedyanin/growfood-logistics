@@ -127,7 +127,7 @@ export default function Import1cPage() {
             <Col><Statistic title="Паллет (в работу)" value={previewStats.pallets} /></Col>
             <Col><Statistic title="Пропуск (вне периметра)" value={previewStats.skip} /></Col>
           </Row>
-          <Table size="small" rowKey="key" dataSource={preview!} columns={previewCols} pagination={{ pageSize: 20 }} scroll={{ x: 800 }} />
+          <Table size="small" rowKey="key" dataSource={preview!} columns={previewCols} pagination={{ pageSize: 50 }} scroll={{ x: 800 }} />
         </Card>
       )}
 

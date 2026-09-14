@@ -222,6 +222,11 @@ export default function TripsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, searchParams]);
 
+  // Форму открыли со страницы «Груз»? Фиксируем в момент открытия, а не читаем
+  // searchParams при сабмите: URL к тому моменту может уже не нести параметр,
+  // и возврат на «Груз» не срабатывал.
+  const openedFromCargoRef = useRef(false);
+
   // Автооткрытие новой формы с предзаполненным грузом из ?newWithCargo=<legId> или ?newWithCargos=id1,id2,...
   const newWithCargoApplied = useRef(false);
   useEffect(() => {
@@ -230,6 +235,7 @@ export default function TripsPage() {
     const ids = legIds ? legIds.split(',').filter(Boolean) : legId ? [legId] : [];
     if (!ids.length || newWithCargoApplied.current) return;
     newWithCargoApplied.current = true;
+    openedFromCargoRef.current = true;
     setEditing(null); setExistingCargo([]); setRemoveIds([]);
     setSelTemplate(undefined);
     form.resetFields();
@@ -260,6 +266,7 @@ export default function TripsPage() {
   }, [searchParams, templates]);
 
   const onAdd = () => {
+    openedFromCargoRef.current = false;
     setEditing(null);
     setExistingCargo([]); setRemoveIds([]);
     setSelTemplate(undefined);
@@ -269,6 +276,7 @@ export default function TripsPage() {
   };
 
   const onEdit = async (r: any) => {
+    openedFromCargoRef.current = false;
     const full = await getTrip(r.id);
     setEditing(full ?? r);
     setExistingCargo(full?.cargoUnits ?? []); setRemoveIds([]);
@@ -318,8 +326,9 @@ export default function TripsPage() {
     const attachCargoIds = (routeStops as any[]).map((s: any) => s.cargoId).filter(Boolean);
     // Форму могли открыть со страницы «Груз» (?newWithCargo/?newWithCargos) —
     // тогда после создания возвращаем оператора туда же: он распределяет пачкой,
-    // и уводить его в список рейсов значит сбивать рабочий контекст.
-    const fromCargo = !!(searchParams.get('newWithCargo') || searchParams.get('newWithCargos'));
+    // и уводить его в список рейсов значит сбивать рабочий контекст. Признак берём
+    // из ref (зафиксирован при открытии), а не из URL — URL к сабмиту ненадёжен.
+    const fromCargo = openedFromCargoRef.current;
     setSubmitting(true);
     try {
       let tripId = editing?.id;
