@@ -46,6 +46,7 @@ const RETAIL_LAAS = [
   { locationCode: 'LOC_MG_VRN', customerCode: 'FRESHMARKET' },
   { locationCode: 'LOC_MG_YAR', customerCode: 'FRESHMARKET' },
   { locationCode: 'LOC-PEREKRESTOK-VESHKI', customerCode: 'ROSTICS' },
+  { locationCode: 'LOC-5KA-NOVAYA-RIGA', customerCode: 'ROSTICS' },
 ];
 
 // Во всех региональных направлениях КД ГФ идёт первой строкой.

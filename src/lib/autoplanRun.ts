@@ -64,10 +64,22 @@ export type AutoPlanResult = {
  *   работают только в общем прогоне. Без directionId — полный двухпроходный
  *   автоплан, как раньше.
  */
+// Сутки считаем по МОСКВЕ (UTC+3, без переходов), а не по UTC. Забор с ночным
+// временем (напр. 01:00 МСК = 22:00 UTC предыдущего дня) иначе уезжал в предыдущие
+// календарные сутки, и «Распределить DD.MM» такое плечо не видел (баг на проде:
+// доставки на Пятёрочку КЗН/Елабугу с забором 01:00 МСК не распределялись).
+const MSK_OFFSET_MS = 3 * 3600 * 1000;
+function mskDayWindow(dateISO: string) {
+  const day = new Date(dateISO.slice(0, 10) + 'T00:00:00.000+03:00');
+  return { day, dayEnd: new Date(day.getTime() + 86400000) };
+}
+function mskDayKey(d: Date) {
+  return new Date(d.getTime() + MSK_OFFSET_MS).toISOString().slice(0, 10);
+}
+
 export async function computeAutoPlan(dateISO: string, directionId?: string | null): Promise<AutoPlanResult> {
 
-  const day = new Date(dateISO.slice(0, 10) + 'T00:00:00.000Z');
-  const dayEnd = new Date(day.getTime() + 86400000);
+  const { day, dayEnd } = mskDayWindow(dateISO);
 
   const legs = await prisma.requestCargoLeg.findMany({
     where: {
@@ -239,7 +251,7 @@ export async function computeAutoPlan(dateISO: string, directionId?: string | nu
  * действительно сделает кнопка «Распределить».
  */
 export async function getUnassignedByDay(weekStartISO: string) {
-  const weekStart = new Date(weekStartISO.slice(0, 10) + 'T00:00:00.000Z');
+  const weekStart = mskDayWindow(weekStartISO).day;
   const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
 
   // Паллеты по дням — одним лёгким запросом на неделю (computeAutoPlan суммарные
@@ -251,12 +263,12 @@ export async function getUnassignedByDay(weekStartISO: string) {
   const palletsByDay = new Map<string, number>();
   for (const l of legs) {
     if (!l.plannedPickup) continue;
-    const key = l.plannedPickup.toISOString().slice(0, 10);
+    const key = mskDayKey(l.plannedPickup);
     palletsByDay.set(key, (palletsByDay.get(key) ?? 0) + (l.cargo.pallets ?? 0));
   }
 
   const dates = Array.from({ length: 7 }, (_, i) =>
-    new Date(weekStart.getTime() + i * 86400000).toISOString().slice(0, 10),
+    mskDayKey(new Date(weekStart.getTime() + i * 86400000)),
   );
 
   const plans = await Promise.all(dates.map((d) => computeAutoPlan(d)));
@@ -292,8 +304,7 @@ export async function getUnassignedByDay(weekStartISO: string) {
  * заказчика: «создаёт всё по новой»).
  */
 export async function applyAutoPlan(dateISO: string, actor: string | null, directionId?: string | null) {
-  const day = new Date(dateISO.slice(0, 10) + 'T00:00:00.000Z');
-  const dayEnd = new Date(day.getTime() + 86400000);
+  const { day, dayEnd } = mskDayWindow(dateISO);
 
   // ── ПЕРЕСБОР: сносим прежние авторейсы этого дня/направления ─────────────────
   // День рейса определяем по забору его плеч (у рейса нет отдельного поля даты).

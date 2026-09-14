@@ -451,5 +451,7 @@ export async function getDriverOptions() {
 export async function getDirectionOptions() {
   await requireAuth();
   const rows = await prisma.direction.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } });
+  // MSK-MSK (внутригородские перевалки в хаб) — самый частый выбор, поднимаем наверх.
+  rows.sort((a, b) => (a.code === 'MSK-MSK' ? -1 : b.code === 'MSK-MSK' ? 1 : 0));
   return rows.map((r) => ({ value: r.id, label: r.name ? `${r.code} — ${r.name}` : r.code }));
 }

@@ -129,7 +129,7 @@ export default function ImportLogPage() {
           <Button size="small" icon={<ReloadOutlined />} onClick={load}>Обновить</Button>
         </Space>
       }>
-        <Table size="small" rowKey="id" loading={loading} dataSource={logs} columns={columns} pagination={{ pageSize: 20 }} scroll={{ x: 900 }} />
+        <Table size="small" rowKey="id" loading={loading} dataSource={logs} columns={columns} pagination={{ pageSize: 50 }} scroll={{ x: 900 }} />
       </Card>
 
       <Modal open={!!detail} onCancel={() => setDetail(null)} footer={null} width={720} title={`Импорт · ${dt(detail?.createdAt)}`}>
