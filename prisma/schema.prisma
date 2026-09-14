@@ -786,6 +786,10 @@ model CustomerRequest {
   createdById        String?
   updatedById        String?
 
+  // Ключ внешней системы (1С): «СкладGUID|ДатаОтгрузкиНаРЦ|ДоговорGUID». Уникален —
+  // приём заказов из 1С делает UPSERT по нему (идемпотентность повторной выгрузки).
+  externalKey        String?          @unique
+
   parentRequestId String?
   parent          CustomerRequest?  @relation("RequestGroup", fields: [parentRequestId], references: [id], onDelete: SetNull)
   groupChildren   CustomerRequest[] @relation("RequestGroup")
@@ -816,6 +820,7 @@ enum RequestStatus {
 enum RequestSource {
   MANUAL
   EMAIL_IMPORT
+  API_1C
 }
 
 model QualityEvent {
