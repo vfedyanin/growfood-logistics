@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { Button, Upload, Card, Table, Tag, Space, message, Typography, Alert, Statistic, Row, Col } from 'antd';
-import { InboxOutlined } from '@ant-design/icons';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Button, Upload, Card, Table, Tag, Space, message, Typography, Alert, Statistic, Row, Col, DatePicker } from 'antd';
+import { InboxOutlined, CloudDownloadOutlined } from '@ant-design/icons';
+import dayjs, { type Dayjs } from 'dayjs';
 import { usePermissions } from '@/hooks/usePermissions';
 import { planFrom1c, type OrderRow, type PlannedDelivery } from '@/lib/ingest1c';
-import { applyIngest, type IngestOutcome, type IngestOutcomeKind } from '@/lib/actions/ingest1c';
+import { applyIngest, ingestFrom1c, is1cConfigured, type IngestOutcome, type IngestOutcomeKind } from '@/lib/actions/ingest1c';
 
 const { Text, Paragraph } = Typography;
 
@@ -36,6 +37,31 @@ export default function Import1cPage() {
   const [preview, setPreview] = useState<PlannedDelivery[] | null>(null);
   const [outcomes, setOutcomes] = useState<IngestOutcome[] | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Забор напрямую из 1С за период
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [range, setRange] = useState<[Dayjs, Dayjs]>([dayjs(), dayjs().add(1, 'day')]);
+  const [fetching, setFetching] = useState(false);
+  useEffect(() => {
+    if (canWrite) is1cConfigured().then(setConfigured).catch(() => setConfigured(false));
+  }, [canWrite]);
+
+  const onFetch = async () => {
+    const [from, to] = range;
+    if (!from || !to) { message.warning('Укажите период'); return; }
+    setFetching(true);
+    try {
+      const res = await ingestFrom1c(from.format('YYYY-MM-DD'), to.format('YYYY-MM-DD'));
+      setOutcomes(res.outcomes);
+      setPreview(null);
+      const c = res.outcomes.filter((o) => o.kind === 'created').length;
+      const u = res.outcomes.filter((o) => o.kind === 'updated').length;
+      const err = res.outcomes.filter((o) => o.kind === 'error').length;
+      message[err ? 'warning' : 'success'](`Получено строк из 1С: ${res.fetched}. Создано ${c}, обновлено ${u}${err ? `, ошибок ${err}` : ''}`);
+    } catch (e: any) {
+      message.error(e?.message || 'Ошибка забора из 1С');
+    } finally { setFetching(false); }
+  };
 
   const onFile = async (f: File) => {
     try {
@@ -97,6 +123,26 @@ export default function Import1cPage() {
 
   return (
     <>
+      <Card size="small" style={{ marginBottom: 16 }} title="Забрать заказы напрямую из 1С (за период)">
+        {configured === false && (
+          <Alert type="warning" showIcon style={{ marginBottom: 12 }}
+            message="Забор из 1С не настроен"
+            description="Не заданы переменные окружения ONEC_ORDERS_URL / ONEC_LOGIN / ONEC_PASSWORD. Пока можно грузить файл выгрузки вручную (ниже)." />
+        )}
+        <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+          Дёргает GET-сервис 1С за выбранный период и сразу принимает заказы (тот же разбор и
+          идемпотентный UPSERT, что при загрузке файла). Период — по дате в сервисе 1С.
+        </Paragraph>
+        <Space wrap align="center">
+          <DatePicker.RangePicker value={range} onChange={(v) => v && v[0] && v[1] && setRange([v[0], v[1]])}
+            format="DD.MM.YYYY" allowClear={false} disabled={!canWrite} />
+          <Button type="primary" icon={<CloudDownloadOutlined />} loading={fetching}
+            disabled={!canWrite || configured === false} onClick={onFetch}>
+            Забрать из 1С и принять
+          </Button>
+        </Space>
+      </Card>
+
       <Card size="small" style={{ marginBottom: 16 }} title="Приём заказов из 1С (файл выгрузки)">
         {!canWrite && <Alert type="info" showIcon message="Недостаточно прав для приёма заказов." style={{ marginBottom: 12 }} />}
         <Paragraph type="secondary" style={{ marginBottom: 12 }}>

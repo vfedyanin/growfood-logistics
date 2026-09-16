@@ -16,6 +16,7 @@ import { recomputeRequestFinals } from '@/lib/pricing';
 import { nextRequestNumber } from '@/lib/numbering';
 import { revalidatePath } from 'next/cache';
 import { planFrom1c, type OrderRow, type ProducerKey } from '@/lib/ingest1c';
+import { fetchProductionOrders, get1cConfig } from '@/lib/onec';
 
 const W: RoleName[] = ['LOGISTICS_MANAGER'];
 
@@ -221,4 +222,22 @@ export async function applyIngest(rows: OrderRow[]): Promise<{ outcomes: IngestO
   revalidatePath('/operations/planning');
   revalidatePath('/requests');
   return { outcomes };
+}
+
+/** Настроен ли HTTP-забор из 1С (заданы переменные окружения). Для UI-подсказки. */
+export async function is1cConfigured(): Promise<boolean> {
+  await requireRole(W);
+  return get1cConfig() != null;
+}
+
+/**
+ * Забор из GET-сервиса 1С за период [dateFrom, dateTo] (YYYY-MM-DD) и приём в заявки.
+ * Даёт HTTP-запрос к 1С (работает только из задеплоенного окружения с доступом к
+ * сервису), затем тот же applyIngest. Возвращает и число полученных строк.
+ */
+export async function ingestFrom1c(dateFrom: string, dateTo: string): Promise<{ fetched: number; outcomes: IngestOutcome[] }> {
+  await requireRole(W);
+  const rows = await fetchProductionOrders(dateFrom, dateTo);
+  const { outcomes } = await applyIngest(rows);
+  return { fetched: rows.length, outcomes };
 }
