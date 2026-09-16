@@ -154,6 +154,9 @@ export type PlannedDelivery = {
   fractional: number;
 };
 
+// Финальный статус заказа в 1С — только такие берём в работу.
+const STATUS_READY = 'Отправлен в админку';
+
 const isoDate = (s: string) => (s || '').slice(0, 10);
 
 /** Главный трансформ: строки выгрузки 1С → плановые поставки. */
@@ -161,6 +164,10 @@ export function planFrom1c(rows: OrderRow[]): PlannedDelivery[] {
   const groups = new Map<string, PlannedDelivery & { _guids: Set<string> }>();
   for (const r of rows) {
     if (r.Проведен === false || r.ФиктивныйЗаказ === true) continue; // не в работе
+    // Берём ТОЛЬКО «Отправлен в админку» — это финальный статус (заказ ушёл в работу,
+    // дальше лишь ручные правки). Пустой статус и «Ошибка» пропускаем: подхватим
+    // при следующем заборе, когда заказ станет «Отправлен в админку» (UPSERT).
+    if ((r.Статус ?? '').trim() !== STATUS_READY) continue;
     const dir = directionForWarehouse(r.СкладGUID);
     if (!dir) continue; // не наш склад — молча мимо
     const delivery = isoDate(r.ДатаОтгрузкиНаРЦ);
