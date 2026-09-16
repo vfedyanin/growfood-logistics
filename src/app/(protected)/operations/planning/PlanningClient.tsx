@@ -32,6 +32,7 @@ type Schedule = {
   destinationLocationId: string | null;
   mon: number | null; tue: number | null; wed: number | null;
   thu: number | null; fri: number | null; sat: number | null; sun: number | null;
+  validFrom: string | Date; validTo: string | Date | null;
   requestTemplateId: string | null;
   customerContract: { id: string; contractNumber: string; customer: { id: string; name: string } };
   direction: { id: string; origin: { id: string; name: string }; destination: { id: string; name: string } } | null;
@@ -215,6 +216,18 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
     return groupMap.get(key)!;
   }
 
+  // Версия графика активна на конкретную дату (даты недели индивидуальны).
+  const activeOn = (s: Schedule, date: dayjs.Dayjs) =>
+    !date.isBefore(dayjs(s.validFrom), 'day') &&
+    (s.validTo == null || !date.isAfter(dayjs(s.validTo), 'day'));
+
+  // Строки дедуплицируем по маршруту (клиент+откуда+куда): если график
+  // версионировали ВНУТРИ отображаемой недели (старая версия закрыта в середине
+  // недели, новая открыта со следующего дня), обе версии попадают в неделю — но
+  // это ОДНА строка. По каждому дню действует версия, активная на эту дату; так
+  // не появляется дубль строки, а смена графика видна по дням.
+  const rowByRoute = new Map<string, Row>();
+
   for (const s of data.schedules) {
     const md = s.magistralDirection;
     const key = md ? `dir:${md.id}` : `pair:${originId(s)}_${destId(s)}`;
@@ -226,41 +239,59 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
         : 'направление не определено — у графика нет шаблона с магистральным плечом',
       md ? md.code : null,
     );
-    g.rows.push({
-      key: s.id,
-      destName: destName(s),
-      customerId: s.customerContract.customer.id,
-      customerName: s.customerContract.customer.name,
-      contractNumber: s.customerContract.contractNumber,
-      oId: originId(s),
-      dId: destId(s),
-      days: DAYS.map((d) => s[d]),
-      dayShift: 0,
-      schedule: s,
-    });
+    const oId = originId(s), dId = destId(s);
+    const days = DAYS.map((d, i) => (activeOn(s, weekDates[i]) ? s[d] : null));
+    const rk = `M|${key}__${s.customerContract.customer.id}__${oId}__${dId}`;
+    const existing = rowByRoute.get(rk);
+    if (existing) {
+      for (let i = 0; i < 7; i++) if (days[i] != null) existing.days[i] = days[i];
+      // Для сохранения/редактирования держим самую свежую версию.
+      if (existing.schedule && dayjs(s.validFrom).isAfter(dayjs(existing.schedule.validFrom))) {
+        existing.schedule = s; existing.key = s.id;
+      }
+    } else {
+      const row: Row = {
+        key: s.id, destName: destName(s),
+        customerId: s.customerContract.customer.id,
+        customerName: s.customerContract.customer.name,
+        contractNumber: s.customerContract.contractNumber,
+        oId, dId, days, dayShift: 0, schedule: s,
+      };
+      rowByRoute.set(rk, row);
+      g.rows.push(row);
+    }
 
     // Эхо в группе транзитного города: дни сдвинуты на смещение забора этого плеча.
     // Сдвиг по модулю недели — поэтому в понедельник видна заявка воскресенья
     // прошлой недели, и заявки за неделю до начала периода сервер тоже отдаёт.
     for (const on of s.onward ?? []) {
+      const ogKey = `dir:${on.directionId}`;
       const og = ensureGroup(
-        `dir:${on.directionId}`,
+        ogKey,
         `${on.code}${on.name ? ` · ${on.name}` : ''}`,
         on.originName && on.destinationName ? `${on.originName} → ${on.destinationName}` : null,
         on.code,
       );
-      og.rows.push({
-        key: `${s.id}__${on.directionId}`,
-        destName: on.legDestinationName ?? on.destinationName ?? '?',
-        customerId: s.customerContract.customer.id,
-        customerName: s.customerContract.customer.name,
-        contractNumber: s.customerContract.contractNumber,
-        oId: originId(s),
-        dId: destId(s),
-        days: DAYS.map((_, i) => s[DAYS[(i - on.dayShift + 7) % 7]]),
-        dayShift: on.dayShift,
-        schedule: null,
+      const odays = DAYS.map((_, i) => {
+        const srcIdx = (i - on.dayShift + 7) % 7;
+        return activeOn(s, weekDates[srcIdx]) ? s[DAYS[srcIdx]] : null;
       });
+      const ork = `T|${ogKey}__${s.customerContract.customer.id}__${oId}__${dId}`;
+      const oexisting = rowByRoute.get(ork);
+      if (oexisting) {
+        for (let i = 0; i < 7; i++) if (odays[i] != null) oexisting.days[i] = odays[i];
+      } else {
+        const orow: Row = {
+          key: `${s.id}__${on.directionId}`,
+          destName: on.legDestinationName ?? on.destinationName ?? '?',
+          customerId: s.customerContract.customer.id,
+          customerName: s.customerContract.customer.name,
+          contractNumber: s.customerContract.contractNumber,
+          oId, dId, days: odays, dayShift: on.dayShift, schedule: null,
+        };
+        rowByRoute.set(ork, orow);
+        og.rows.push(orow);
+      }
     }
   }
   const groups = Array.from(groupMap.values());
