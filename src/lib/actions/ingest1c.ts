@@ -27,6 +27,7 @@ const PRODUCER_CUSTOMER: Record<Exclude<ProducerKey, 'SKIP'>, string> = {
   BIRYULEVO: 'cmsewlfjj0001esbil102wo2v',
   PRIEM: 'cmsewn0rh0003esbio1wswmey',
   FUDHOLDING: 'cmsewp5jw0005esbiffv12xdi',
+  SENDWICH: 'cmsewpskh0007esbi18ff90ef',
 };
 
 // Перенос времени из шаблонного плеча на расчётную дату (как в planning.ts).

@@ -11,7 +11,8 @@ import { applyIngest, ingestFrom1c, is1cConfigured, type IngestOutcome, type Ing
 const { Text, Paragraph } = Typography;
 
 const producerLabel: Record<string, string> = {
-  BIRYULEVO: 'Завод Бирюлёво', PRIEM: 'Завод Приём', FUDHOLDING: 'ГФ Фудхолдинг', SKIP: '— (пропуск)',
+  BIRYULEVO: 'Завод Бирюлёво', PRIEM: 'Завод Приём', FUDHOLDING: 'ГФ Фудхолдинг',
+  SENDWICH: 'Сендвич-Цех', SKIP: '— (пропуск)',
 };
 const kindCfg: Record<IngestOutcomeKind, { color: string; label: string }> = {
   created: { color: 'green', label: 'Создана' },
