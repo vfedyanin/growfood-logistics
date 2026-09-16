@@ -5,11 +5,13 @@
 // отдельно (см. src/lib/actions/ingest1c.ts), чтобы логику можно было гонять и
 // проверять на файлах-образцах.
 //
-// Решения (согласованы с заказчиком, см. память 07–14.09):
-//  • Берём только заказы, чей СкладGUID в белом списке (15 точек Магнит/Дикси/ВВ).
-//    Всё прочее — молча мимо (хаб-производство, Урал, циферные Дикси).
-//  • Поставка = СкладGUID + ДатаОтгрузкиНаРЦ + ДоговорGUID (дробим по производителю:
-//    1 Договор = 1 производитель).
+// Решения (согласованы с заказчиком, см. память 07–16.09):
+//  • Берём только заказы, чей СкладGUID в белом списке (15 РЦ Магнит/Дикси/ВВ + Фудмайлз).
+//    Всё прочее — молча мимо (Екатеринбург/Урал, Тандер-магазины, циферные Дикси).
+//  • Производитель — по ЦФОДоговора (центр ответственности = фактическое производство:
+//    Бирюлёво/Приём/Фудхолдинг/Цех Сэндвичей), фолбэк на карту договоров для старых данных.
+//  • Поставка = СкладGUID + ДатаОтгрузкиНаРЦ + производитель (ЦФО); договоры одного
+//    производителя сливаются в одну заявку.
 //  • Идемпотентность — по ключу поставки (externalKey), см. серверный модуль.
 //  • Паллеты = ceil( Σ по строкам ( Количество / НоменклатураКвант /
 //    НоменклатураКоличествоНаПаллете ) ); пусто/0 в квант/напаллете → 1.
@@ -34,6 +36,12 @@ export type OrderRow = {
   Проведен?: boolean;
   ФиктивныйЗаказ?: boolean;
   Статус?: string;
+  // Добавлены 1С 16.09 для определения производителя. ЦФОДоговора = центр
+  // финансовой ответственности = фактическое производство (надёжнее названия договора).
+  ЦФОДоговора?: string;
+  ЦФОДоговораGUID?: string;
+  ПроектДоговора?: string;
+  ПроектДоговораGUID?: string;
 };
 
 // СкладGUID (префикс) → код нашего направления. Префиксы — из разбора выгрузки;
@@ -54,57 +62,64 @@ export const WAREHOUSE_TO_DIRECTION: { prefix: string; direction: string; rc: st
   { prefix: 'ef78fd48', direction: 'SPB-DX-SHR', rc: 'РЦ Дикси Шушары' },
   { prefix: 'ecd7a585', direction: 'MSK-VV-DMD', rc: 'РЦ ВкусВилл Домодедово' },
   { prefix: '0e709fee', direction: 'MSK-VV-VSH', rc: 'РЦ ВкусВилл Вешки' },
+  { prefix: 'cbc89be6', direction: 'MSK-FMILES', rc: 'Склад Фудмайлз' },
 ];
 
-// Производитель-отправитель. Определяется по ДоговорGUID (1 Договор = 1
-// производитель). Ключи разрешаются в конкретного Customer в серверном модуле.
-//  • BIRYULEVO / PRIEM / FUDHOLDING — наши производства, идут в заявки.
-//  • SKIP — производитель вне периметра (Студия Вкуса не существует, Сендвич-Цех
-//    ещё не заведён) либо спорный без ответа заказчика — поставка пропускается.
-export type ProducerKey = 'BIRYULEVO' | 'PRIEM' | 'FUDHOLDING' | 'SKIP';
+// Производитель-отправитель. Определяется по ЦФОДоговора (центр финансовой
+// ответственности = фактическое производство), с фолбэком на старую карту
+// договоров для данных без ЦФО. Ключи разрешаются в конкретного Customer в
+// серверном модуле.
+//  • BIRYULEVO / PRIEM / FUDHOLDING / SENDWICH — наши производства, идут в заявки.
+//  • SKIP — вне периметра (Екатеринбург/Урал и пр.) — поставка пропускается.
+export type ProducerKey = 'BIRYULEVO' | 'PRIEM' | 'FUDHOLDING' | 'SENDWICH' | 'SKIP';
 
-// Явная карта ДоговорGUID → производитель (из разбора выгрузки 04–14.09).
-// Префиксы GUID достаточно уникальны в периметре; сверять по началу строки.
-export const DOGOVOR_TO_PRODUCER: { prefix: string; producer: ProducerKey; note?: string }[] = [
-  { prefix: '7508df62', producer: 'BIRYULEVO', note: 'Завод Бирюлёво' },
-  { prefix: '7d384066', producer: 'FUDHOLDING', note: 'ГФ Фудхолдинг' },
-  { prefix: '97c20ca5', producer: 'PRIEM', note: 'Дикси_Прием' },
-  // 10 договоров «Магнит_РЦ_Прием» → Завод Приём
-  { prefix: '26a8847d', producer: 'PRIEM' },
-  { prefix: '43172e41', producer: 'PRIEM' },
-  { prefix: '97123d64', producer: 'PRIEM' },
-  { prefix: '30379a8a', producer: 'PRIEM' },
-  { prefix: '56c8fab2', producer: 'PRIEM' },
-  { prefix: '704e245c', producer: 'PRIEM' },
-  { prefix: '3a688efd', producer: 'PRIEM' },
-  { prefix: 'f855d49e', producer: 'PRIEM' },
-  { prefix: '0c13fe6e', producer: 'PRIEM' },
-  { prefix: '1001ec6f', producer: 'PRIEM' },
-  // спорные, разрешённые по контексту (см. память):
-  { prefix: 'e8f153ed', producer: 'BIRYULEVO', note: 'Дикси, товар «Завод Бирюлёво»' },
-  { prefix: '237c730d', producer: 'BIRYULEVO', note: 'ВВ, «ВВ Завод Бирюлёво»' },
-  // Студия Вкуса — не существует, пропускаем:
-  { prefix: 'dde0e3a5', producer: 'SKIP', note: 'Студия Вкуса (не существует)' },
-  { prefix: 'eb8389c2', producer: 'SKIP', note: 'Студия Вкуса (не существует)' },
-  // РЕАЛЬНО спорный, ждёт ответа заказчика (кто производитель) — пока пропускаем:
-  { prefix: '9da53048', producer: 'SKIP', note: 'ГК/30738/24 — производитель не подтверждён' },
+// ОСНОВНОЙ ключ: ЦФОДоговораGUID → производитель (получено 16.09 из выгрузки с
+// новыми полями). Полные GUID, сверять по началу строки.
+export const CFO_TO_PRODUCER: { prefix: string; producer: ProducerKey; note?: string }[] = [
+  { prefix: '46499874', producer: 'BIRYULEVO', note: 'Собственное_производство_Бирюлево' },
+  { prefix: 'cf27f42b', producer: 'PRIEM', note: 'Собственное_производство_Прием' },
+  { prefix: 'e1ec8187', producer: 'FUDHOLDING', note: 'Собственное_производство_Фудхолдинг' },
+  { prefix: '776f3588', producer: 'SENDWICH', note: 'Собственное производство_Цех Сэндвичей' },
+  // Урал — вне периметра:
+  { prefix: '5aaf9e29', producer: 'SKIP', note: 'Собственное_производство_Екатеринбург (Урал)' },
 ];
 
-// Суффикс проекта в названии договора → производитель (fallback, если GUID не в
-// карте). В названии зашито «Магнит_РЦ_Бирюлево / _Прием / _Фудхолдинг».
-function producerFromName(dogovor: string): ProducerKey | null {
-  const s = (dogovor || '').toLowerCase();
+// ЦФО по слову — фолбэк, если GUID незнаком, но текст ЦФО заполнен.
+function producerFromCfoName(cfo: string): ProducerKey | null {
+  const s = (cfo || '').toLowerCase();
+  if (s.includes('екатеринбург')) return 'SKIP';
+  if (s.includes('сэндвич') || s.includes('сендвич') || s.includes('цех')) return 'SENDWICH';
   if (s.includes('фудхолдинг')) return 'FUDHOLDING';
-  if (s.includes('_прием') || s.includes('_приём') || s.includes(' прием') || s.includes(' приём')) return 'PRIEM';
+  if (s.includes('прием') || s.includes('приём')) return 'PRIEM';
   if (s.includes('бирюлево') || s.includes('бирюлёво')) return 'BIRYULEVO';
   return null;
 }
 
-export function producerForDogovor(dogovorGuid: string | undefined, dogovorName: string | undefined): ProducerKey {
-  const g = dogovorGuid ?? '';
-  const hit = DOGOVOR_TO_PRODUCER.find((d) => g.startsWith(d.prefix));
-  if (hit) return hit.producer;
-  return producerFromName(dogovorName ?? '') ?? 'SKIP';
+// СТАРЫЙ фолбэк по ДоговорGUID — для данных БЕЗ ЦФО (до 16.09). НЕ содержит 7d384066
+// (по ЦФО он оказался Цех Сэндвичей, а не Фудхолдинг — договор врал названием).
+export const DOGOVOR_TO_PRODUCER: { prefix: string; producer: ProducerKey; note?: string }[] = [
+  { prefix: '7508df62', producer: 'BIRYULEVO' },
+  { prefix: '97c20ca5', producer: 'PRIEM' },
+  { prefix: '26a8847d', producer: 'PRIEM' }, { prefix: '43172e41', producer: 'PRIEM' },
+  { prefix: '97123d64', producer: 'PRIEM' }, { prefix: '30379a8a', producer: 'PRIEM' },
+  { prefix: '56c8fab2', producer: 'PRIEM' }, { prefix: '704e245c', producer: 'PRIEM' },
+  { prefix: '3a688efd', producer: 'PRIEM' }, { prefix: 'f855d49e', producer: 'PRIEM' },
+  { prefix: '0c13fe6e', producer: 'PRIEM' }, { prefix: '1001ec6f', producer: 'PRIEM' },
+  { prefix: 'e8f153ed', producer: 'BIRYULEVO' }, { prefix: '237c730d', producer: 'BIRYULEVO' },
+  { prefix: 'dde0e3a5', producer: 'SKIP', note: 'Студия Вкуса' },
+  { prefix: 'eb8389c2', producer: 'SKIP', note: 'Студия Вкуса' },
+];
+
+/** Производитель заказа: ЦФОДоговораGUID → ЦФО-текст → карта договоров → SKIP. */
+export function producerForOrder(r: OrderRow): ProducerKey {
+  const cfoG = r.ЦФОДоговораGUID ?? '';
+  const byCfoGuid = CFO_TO_PRODUCER.find((c) => cfoG.startsWith(c.prefix));
+  if (byCfoGuid) return byCfoGuid.producer;
+  const byCfoName = producerFromCfoName(r.ЦФОДоговора ?? '');
+  if (byCfoName) return byCfoName;
+  const g = r.ДоговорGUID ?? '';
+  const byDog = DOGOVOR_TO_PRODUCER.find((d) => g.startsWith(d.prefix));
+  return byDog ? byDog.producer : 'SKIP';
 }
 
 const num = (x: unknown): number => {
@@ -126,7 +141,7 @@ export function fractionalPallets(r: OrderRow): number {
 }
 
 export type PlannedDelivery = {
-  key: string;                 // СкладGUID|дата|ДоговорGUID — ключ поставки (externalKey без префикса)
+  key: string;                 // СкладGUID|дата|ЦФОДоговораGUID — ключ поставки = РЦ+дата+производитель (externalKey без префикса)
   direction: string;          // код направления (Route.code)
   rc: string;
   deliveryDate: string;        // YYYY-MM-DD, ДатаОтгрузкиНаРЦ (выгрузка на РЦ)
@@ -139,6 +154,9 @@ export type PlannedDelivery = {
   fractional: number;
 };
 
+// Финальный статус заказа в 1С — только такие берём в работу.
+const STATUS_READY = 'Отправлен в админку';
+
 const isoDate = (s: string) => (s || '').slice(0, 10);
 
 /** Главный трансформ: строки выгрузки 1С → плановые поставки. */
@@ -146,17 +164,25 @@ export function planFrom1c(rows: OrderRow[]): PlannedDelivery[] {
   const groups = new Map<string, PlannedDelivery & { _guids: Set<string> }>();
   for (const r of rows) {
     if (r.Проведен === false || r.ФиктивныйЗаказ === true) continue; // не в работе
+    // Берём ТОЛЬКО «Отправлен в админку» — это финальный статус (заказ ушёл в работу,
+    // дальше лишь ручные правки). Пустой статус и «Ошибка» пропускаем: подхватим
+    // при следующем заборе, когда заказ станет «Отправлен в админку» (UPSERT).
+    if ((r.Статус ?? '').trim() !== STATUS_READY) continue;
     const dir = directionForWarehouse(r.СкладGUID);
     if (!dir) continue; // не наш склад — молча мимо
     const delivery = isoDate(r.ДатаОтгрузкиНаРЦ);
     if (!delivery) continue;
-    const key = `${r.СкладGUID}|${delivery}|${r.ДоговорGUID}`;
+    // Поставка = РЦ + дата + ПРОИЗВОДИТЕЛЬ. Дискриминатор — ЦФОДоговораGUID (все
+    // договоры одного производителя сливаются в одну заявку); для старых данных
+    // без ЦФО — ДоговорGUID.
+    const producerKey = r.ЦФОДоговораGUID || r.ДоговорGUID;
+    const key = `${r.СкладGUID}|${delivery}|${producerKey}`;
     let g = groups.get(key);
     if (!g) {
       g = {
         key, direction: dir.direction, rc: dir.rc, deliveryDate: delivery,
-        dogovorGuid: r.ДоговорGUID, dogovor: r.Договор,
-        producer: producerForDogovor(r.ДоговорGUID, r.Договор),
+        dogovorGuid: r.ДоговорGUID, dogovor: r.ЦФОДоговора || r.Договор,
+        producer: producerForOrder(r),
         sourceOrderGuids: [], lines: 0, pallets: 0, fractional: 0,
         _guids: new Set<string>(),
       };
