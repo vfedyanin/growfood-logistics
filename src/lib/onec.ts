@@ -22,6 +22,15 @@ export function get1cConfig(): OneCConfig | null {
   return { url, login, password };
 }
 
+/** Имена переменных 1С, которые НЕ заданы в окружении (пустой список = всё на месте). */
+export function missing1cConfig(): string[] {
+  const miss: string[] = [];
+  if (!process.env.ONEC_ORDERS_URL) miss.push('ONEC_ORDERS_URL');
+  if (!process.env.ONEC_LOGIN) miss.push('ONEC_LOGIN');
+  if (!process.env.ONEC_PASSWORD) miss.push('ONEC_PASSWORD');
+  return miss;
+}
+
 /** Достаёт массив строк из ответа сервиса: { data: [...] } либо голый [...]. */
 function extractRows(parsed: unknown): OrderRow[] {
   if (Array.isArray(parsed)) return parsed as OrderRow[];
