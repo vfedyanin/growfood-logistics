@@ -6,7 +6,7 @@ import { InboxOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { usePermissions } from '@/hooks/usePermissions';
 import { planFrom1c, type OrderRow, type PlannedDelivery } from '@/lib/ingest1c';
-import { applyIngest, ingestFrom1c, is1cConfigured, type IngestOutcome, type IngestOutcomeKind } from '@/lib/actions/ingest1c';
+import { applyIngest, ingestFrom1c, is1cConfigured, missing1cEnv, type IngestOutcome, type IngestOutcomeKind } from '@/lib/actions/ingest1c';
 
 const { Text, Paragraph } = Typography;
 
@@ -41,10 +41,12 @@ export default function Import1cPage() {
 
   // Забор напрямую из 1С за период
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const [missingEnv, setMissingEnv] = useState<string[]>([]);
   const [range, setRange] = useState<[Dayjs, Dayjs]>([dayjs(), dayjs().add(1, 'day')]);
   const [fetching, setFetching] = useState(false);
   useEffect(() => {
     if (canWrite) is1cConfigured().then(setConfigured).catch(() => setConfigured(false));
+    if (canWrite) missing1cEnv().then(setMissingEnv).catch(() => setMissingEnv([]));
   }, [canWrite]);
 
   const onFetch = async () => {
@@ -128,7 +130,7 @@ export default function Import1cPage() {
         {configured === false && (
           <Alert type="warning" showIcon style={{ marginBottom: 12 }}
             message="Забор из 1С не настроен"
-            description="Не заданы переменные окружения ONEC_ORDERS_URL / ONEC_LOGIN / ONEC_PASSWORD. Пока можно грузить файл выгрузки вручную (ниже)." />
+            description={`Не заданы переменные окружения: ${missingEnv.length ? missingEnv.join(', ') : 'ONEC_ORDERS_URL / ONEC_LOGIN / ONEC_PASSWORD'}. Пока можно грузить файл выгрузки вручную (ниже).`} />
         )}
         <Paragraph type="secondary" style={{ marginBottom: 12 }}>
           Дёргает GET-сервис 1С за выбранный период и сразу принимает заказы (тот же разбор и

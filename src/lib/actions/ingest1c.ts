@@ -16,7 +16,7 @@ import { recomputeRequestFinals } from '@/lib/pricing';
 import { nextRequestNumber } from '@/lib/numbering';
 import { revalidatePath } from 'next/cache';
 import { planFrom1c, type OrderRow, type ProducerKey } from '@/lib/ingest1c';
-import { fetchProductionOrders, get1cConfig } from '@/lib/onec';
+import { fetchProductionOrders, get1cConfig, missing1cConfig } from '@/lib/onec';
 
 const W: RoleName[] = ['LOGISTICS_MANAGER'];
 
@@ -229,6 +229,12 @@ export async function applyIngest(rows: OrderRow[]): Promise<{ outcomes: IngestO
 export async function is1cConfigured(): Promise<boolean> {
   await requireRole(W);
   return get1cConfig() != null;
+}
+
+/** Какие переменные окружения 1С не заданы (для диагностики на странице приёма). */
+export async function missing1cEnv(): Promise<string[]> {
+  await requireRole(W);
+  return missing1cConfig();
 }
 
 /**
