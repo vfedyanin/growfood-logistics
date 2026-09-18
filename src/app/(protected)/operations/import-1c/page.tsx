@@ -42,7 +42,7 @@ export default function Import1cPage() {
   // Забор напрямую из 1С за период
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [missingEnv, setMissingEnv] = useState<string[]>([]);
-  const [range, setRange] = useState<[Dayjs, Dayjs]>([dayjs(), dayjs().add(1, 'day')]);
+  const [pickDate, setPickDate] = useState<Dayjs>(dayjs());
   const [fetching, setFetching] = useState(false);
 
   // Журнал прошлых прогонов
@@ -63,12 +63,12 @@ export default function Import1cPage() {
   }, [canWrite]);
 
   const onFetch = async () => {
-    const [from, to] = range;
-    if (!from || !to) { message.warning('Укажите период'); return; }
+    if (!pickDate) { message.warning('Укажите дату заказа'); return; }
     setFetching(true);
     setOpenedRun(null);
     try {
-      const res = await ingestFrom1c(from.format('YYYY-MM-DD'), to.format('YYYY-MM-DD'));
+      const d = pickDate.format('YYYY-MM-DD');
+      const res = await ingestFrom1c(d, d);
       setOutcomes(res.outcomes);
       setPreview(null);
       const c = res.outcomes.filter((o) => o.kind === 'created').length;
@@ -135,7 +135,7 @@ export default function Import1cPage() {
   const runCols = [
     { title: 'Когда', dataIndex: 'createdAt', key: 't', width: 150, render: (t: string) => dayjs(t).format('DD.MM.YYYY HH:mm') },
     { title: 'Источник', dataIndex: 'source', key: 's', width: 100, render: (s: string) => <Tag color={s === 'API_1C' ? 'blue' : 'default'}>{sourceLabel(s)}</Tag> },
-    { title: 'Период / файл', key: 'pf', ellipsis: true, render: (_: any, r: IngestRunSummary) => r.source === 'API_1C' ? `${r.dateFrom ?? '?'} … ${r.dateTo ?? '?'}` : (r.fileName || '—') },
+    { title: 'Дата заказа / файл', key: 'pf', ellipsis: true, render: (_: any, r: IngestRunSummary) => r.source === 'API_1C' ? (r.dateFrom === r.dateTo ? (r.dateFrom ?? '?') : `${r.dateFrom ?? '?'} … ${r.dateTo ?? '?'}`) : (r.fileName || '—') },
     { title: 'Строк', dataIndex: 'fetched', key: 'f', width: 70, align: 'right' as const },
     { title: 'Итоги', key: 'res', width: 240, render: (_: any, r: IngestRunSummary) => (
       <Space size={4} wrap>
@@ -159,18 +159,20 @@ export default function Import1cPage() {
 
   return (
     <>
-      <Card size="small" style={{ marginBottom: 16 }} title="Забрать заказы напрямую из 1С (за период)">
+      <Card size="small" style={{ marginBottom: 16 }} title="Забрать заказы напрямую из 1С">
         {configured === false && (
           <Alert type="warning" showIcon style={{ marginBottom: 12 }}
             message="Забор из 1С не настроен"
             description={`Не заданы переменные окружения: ${missingEnv.length ? missingEnv.join(', ') : 'ONEC_ORDERS_URL / ONEC_LOGIN / ONEC_PASSWORD'}. Пока можно грузить файл выгрузки вручную (ниже).`} />
         )}
         <Paragraph type="secondary" style={{ marginBottom: 12 }}>
-          Дёргает GET-сервис 1С за выбранный период и сразу принимает заказы (тот же разбор и
-          идемпотентный UPSERT, что при загрузке файла). Период — по дате в сервисе 1С.
+          Забирает заказы <b>по дате заказа в 1С</b> (когда заказ оформлен), не по дате выгрузки.
+          Выгрузка на РЦ у них на 1–4 дня позже — заявки сами встанут на свои даты доставки.
+          Брать <b>сегодняшнюю дату после 18:10 МСК</b>, когда заказы финализированы («Отправлен
+          в админку»). Приём идемпотентный: повторный забор той же даты обновляет заявки, а не плодит.
         </Paragraph>
         <Space wrap align="center">
-          <DatePicker.RangePicker value={range} onChange={(v) => v && v[0] && v[1] && setRange([v[0], v[1]])}
+          <DatePicker value={pickDate} onChange={(v) => v && setPickDate(v)}
             format="DD.MM.YYYY" allowClear={false} disabled={!canWrite} />
           <Button type="primary" icon={<CloudDownloadOutlined />} loading={fetching}
             disabled={!canWrite || configured === false} onClick={onFetch}>
