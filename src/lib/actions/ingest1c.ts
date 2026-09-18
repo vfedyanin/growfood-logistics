@@ -10,8 +10,9 @@
 // Заявку, уже ушедшую из статуса NEW (логист принял в работу), повторная выгрузка
 // НЕ перетирает — только сообщает в отчёте.
 
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireRole, getActorId, RoleName } from '@/lib/authz';
+import { requireRole, RoleName } from '@/lib/authz';
 import { recomputeRequestFinals } from '@/lib/pricing';
 import { nextRequestNumber } from '@/lib/numbering';
 import { revalidatePath } from 'next/cache';
@@ -59,13 +60,25 @@ export type IngestOutcome = {
   message?: string;
 };
 
+// Откуда прогон: загрузка файла или забор из сервиса 1С. Пишется в журнал IngestRun.
+export type IngestRunMeta = {
+  source: 'FILE' | 'API_1C';
+  fileName?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  fetched?: number;
+};
+
 /**
  * Приём выгрузки 1С. Не делает сети — принимает уже полученные строки. Возвращает
  * отчёт по каждой поставке (для просмотра логистом и как чек-лист «нет шаблона»).
  */
-export async function applyIngest(rows: OrderRow[]): Promise<{ outcomes: IngestOutcome[] }> {
-  await requireRole(W);
-  const actor = await getActorId();
+export async function applyIngest(
+  rows: OrderRow[],
+  meta: IngestRunMeta = { source: 'FILE' },
+): Promise<{ outcomes: IngestOutcome[] }> {
+  const user = await requireRole(W);
+  const actor = user.id;
 
   const deliveries = planFrom1c(rows);
   const outcomes: IngestOutcome[] = [];
@@ -220,8 +233,33 @@ export async function applyIngest(rows: OrderRow[]): Promise<{ outcomes: IngestO
     }
   }
 
+  // Журнал прогона: счётчики + весь отчёт целиком, чтобы открыть загрузку позже.
+  const count = (k: IngestOutcomeKind) => outcomes.filter((o) => o.kind === k).length;
+  try {
+    await prisma.ingestRun.create({
+      data: {
+        createdById: actor,
+        createdByName: user.name ?? user.email ?? null,
+        source: meta.source,
+        dateFrom: meta.dateFrom ?? null,
+        dateTo: meta.dateTo ?? null,
+        fileName: meta.fileName ?? null,
+        fetched: meta.fetched ?? rows.length,
+        created: count('created'),
+        updated: count('updated'),
+        skippedInwork: count('skipped_inwork'),
+        skippedProducer: count('skipped_producer'),
+        errors: count('error'),
+        outcomes: outcomes as unknown as Prisma.InputJsonValue,
+      },
+    });
+  } catch {
+    // журнал не должен ронять сам приём — заявки уже созданы
+  }
+
   revalidatePath('/operations/planning');
   revalidatePath('/requests');
+  revalidatePath('/operations/import-1c');
   return { outcomes };
 }
 
@@ -237,6 +275,44 @@ export async function missing1cEnv(): Promise<string[]> {
   return missing1cConfig();
 }
 
+export type IngestRunSummary = {
+  id: string;
+  createdAt: string;
+  createdByName: string | null;
+  source: 'FILE' | 'API_1C';
+  dateFrom: string | null;
+  dateTo: string | null;
+  fileName: string | null;
+  fetched: number;
+  created: number;
+  updated: number;
+  skippedInwork: number;
+  skippedProducer: number;
+  errors: number;
+};
+
+/** Журнал прогонов приёма 1С (новые сверху). Для страницы «Приём заказов 1С». */
+export async function listIngestRuns(limit = 50): Promise<IngestRunSummary[]> {
+  await requireRole(W);
+  const runs = await prisma.ingestRun.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    select: {
+      id: true, createdAt: true, createdByName: true, source: true,
+      dateFrom: true, dateTo: true, fileName: true, fetched: true,
+      created: true, updated: true, skippedInwork: true, skippedProducer: true, errors: true,
+    },
+  });
+  return runs.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+}
+
+/** Полный отчёт одного прогона (тот же IngestOutcome[], что был при загрузке). */
+export async function getIngestRunOutcomes(id: string): Promise<IngestOutcome[]> {
+  await requireRole(W);
+  const run = await prisma.ingestRun.findUnique({ where: { id }, select: { outcomes: true } });
+  return (run?.outcomes as unknown as IngestOutcome[]) ?? [];
+}
+
 /**
  * Забор из GET-сервиса 1С за период [dateFrom, dateTo] (YYYY-MM-DD) и приём в заявки.
  * Даёт HTTP-запрос к 1С (работает только из задеплоенного окружения с доступом к
@@ -245,6 +321,6 @@ export async function missing1cEnv(): Promise<string[]> {
 export async function ingestFrom1c(dateFrom: string, dateTo: string): Promise<{ fetched: number; outcomes: IngestOutcome[] }> {
   await requireRole(W);
   const rows = await fetchProductionOrders(dateFrom, dateTo);
-  const { outcomes } = await applyIngest(rows);
+  const { outcomes } = await applyIngest(rows, { source: 'API_1C', dateFrom, dateTo, fetched: rows.length });
   return { fetched: rows.length, outcomes };
 }

@@ -823,6 +823,35 @@ enum RequestSource {
   API_1C
 }
 
+// Откуда пришёл прогон приёма 1С: загрузка файла или забор из GET-сервиса.
+enum IngestSource {
+  FILE
+  API_1C
+}
+
+// Журнал прогонов приёма заказов из 1С. Хранит счётчики и весь отчёт целиком
+// (outcomes = IngestOutcome[]), чтобы можно было открыть прошлую загрузку как в
+// момент приёма. Пишется в applyIngest (файл) и ingestFrom1c (забор).
+model IngestRun {
+  id              String       @id @default(cuid())
+  createdAt       DateTime     @default(now())
+  createdById     String?
+  createdByName   String?
+  source          IngestSource
+  dateFrom        String?
+  dateTo          String?
+  fileName        String?
+  fetched         Int          @default(0)
+  created         Int          @default(0)
+  updated         Int          @default(0)
+  skippedInwork   Int          @default(0)
+  skippedProducer Int          @default(0)
+  errors          Int          @default(0)
+  outcomes        Json
+
+  @@index([createdAt])
+}
+
 model QualityEvent {
   id                 String           @id @default(cuid())
   tripId             String
