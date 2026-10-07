@@ -120,6 +120,32 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
     },
   });
 
+  // Портянка — это «что СЕГОДНЯ выезжает из Москвы». У многоплечевых заявок
+  // (Колпино/Шушары через РЦ СПб, Казань → Ижевск/Самара) онвард-плечо из
+  // транзитного города забирается на день-два ПОЗЖЕ первого. Если брать любое
+  // плечо с забором за день, в портянку за день X попадает и локальное плечо
+  // заявки, выехавшей из Москвы раньше, — и объём РЦ задваивается (симптом был у
+  // Магнит Колпино/Шушары). Поэтому берём груз, только если ПЕРВОЕ его плечо
+  // (минимальный забор по всему грузу) приходится на этот день.
+  const cargoIds = Array.from(new Set(legs.map((l) => l.cargo.id)));
+  const firstPickup = new Map<string, number>();
+  if (cargoIds.length) {
+    const mins = await prisma.requestCargoLeg.groupBy({
+      by: ['requestCargoId'],
+      where: { requestCargoId: { in: cargoIds }, plannedPickup: { not: null } },
+      _min: { plannedPickup: true },
+    });
+    for (const m of mins) {
+      if (m._min.plannedPickup) firstPickup.set(m.requestCargoId, m._min.plannedPickup.getTime());
+    }
+  }
+  const departsToday = (l: (typeof legs)[number]) => {
+    const first = firstPickup.get(l.cargo.id);
+    return first != null && first >= day.getTime() && first < dayEnd.getTime();
+  };
+  // Только грузы, выезжающие из Москвы сегодня (первое плечо — в этот день).
+  const legsToday = legs.filter(departsToday);
+
   const out: string[] = [];
   const dayLabel = ddmm(day);
 
@@ -131,7 +157,7 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
 
   // Блоки 1–2: отгрузка с точки забора. Строка — конечная точка выгрузки заявки.
   for (const b of PICKUP_BLOCKS) {
-    const rows = dedupe(legs.filter((l) => l.pickupLocation?.code === b.locationCode)).map((l) => ({
+    const rows = dedupe(legsToday.filter((l) => l.pickupLocation?.code === b.locationCode)).map((l) => ({
       label: `${clean(l.cargo.request.deliveryLocation?.name)} - ${clean(l.cargo.request.customer.name)}`,
       pallets: l.cargo.pallets ?? 0,
     }));
@@ -142,7 +168,7 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
   const retailRows: Row[] = [];
   for (const pair of RETAIL_LAAS) {
     const matched = dedupe(
-      legs.filter(
+      legsToday.filter(
         (l) =>
           l.cargo.request.deliveryLocation?.code === pair.locationCode &&
           l.cargo.request.customer.code === pair.customerCode,
@@ -159,7 +185,7 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
   // Блоки направлений. Даты в шапке берутся с самих плеч направления —
   // это и есть отгрузка и доставка магистрального плеча.
   for (const b of DIRECTION_BLOCKS) {
-    const mine = dedupe(legs.filter((l) => l.direction?.code === b.directionCode));
+    const mine = dedupe(legsToday.filter((l) => l.direction?.code === b.directionCode));
     const rows = mine.map((l) => ({
       label: `${clean(l.cargo.request.deliveryLocation?.name)} - ${clean(l.cargo.request.customer.name)}`,
       pallets: l.cargo.pallets ?? 0,
