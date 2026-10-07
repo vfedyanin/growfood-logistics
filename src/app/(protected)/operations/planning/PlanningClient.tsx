@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Button, InputNumber, Spin, Typography, Tooltip, Badge, DatePicker, Modal, message } from 'antd';
+import { Button, InputNumber, Spin, Typography, Tooltip, Badge, DatePicker, Modal, message, Popover } from 'antd';
 import {
   LeftOutlined, RightOutlined, CheckOutlined, DownOutlined,
   CheckCircleFilled, ExclamationCircleFilled, CloseCircleFilled,
@@ -354,14 +354,20 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
   for (const g of visibleGroups) superMap.get(superKeyOf(g))!.groups.push(g);
   const superGroups = SUPER_ORDER.map((s) => superMap.get(s.key)!).filter((sg) => sg.groups.length);
 
-  function findRequest(customerId: string, oId: string, dId: string, dayDate: dayjs.Dayjs): Req | undefined {
+  // ВСЕ заявки ячейки (клиент+откуда+куда+дата). На одну ячейку их может быть
+  // несколько: легитимно (два заказа) или по ошибке (дубль). Сетка обязана
+  // показывать это честно, иначе дубль не отличить от одной заявки.
+  function findRequests(customerId: string, oId: string, dId: string, dayDate: dayjs.Dayjs): Req[] {
     const dayStr = dayDate.format('YYYY-MM-DD');
-    return data.requests.find(r =>
+    return data.requests.filter(r =>
       r.customerId === customerId &&
       r.pickupLocationId === oId &&
       r.deliveryLocationId === dId &&
       r.pickupDate?.startsWith(dayStr),
     );
+  }
+  function findRequest(customerId: string, oId: string, dId: string, dayDate: dayjs.Dayjs): Req | undefined {
+    return findRequests(customerId, oId, dId, dayDate)[0];
   }
 
   // Готовность направления к ЗАВТРАШНЕЙ отгрузке: сколько строк, по которым завтра
@@ -747,7 +753,8 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
                         const ck = `${cid}__${sOid}__${sDid}__${dStr}`;
                         // У строки транзитного города заявка забиралась раньше на dayShift дней
                         const reqDate = row.dayShift ? dayDate.subtract(row.dayShift, 'day') : dayDate;
-                        const existingReq = findRequest(cid, sOid, sDid, reqDate);
+                        const existingReqs = findRequests(cid, sOid, sDid, reqDate);
+                        const existingReq = existingReqs[0];
                         const isSaving = saving.has(ck);
                         const val = pending[ck] ?? null;
 
@@ -756,26 +763,53 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
                         // графика, исчезают из сетки, оставаясь живыми в базе.
                         if (existingReq) {
                           const offSchedule = !scheduled;
+                          const multi = existingReqs.length > 1;
+                          const sumPallets = existingReqs.reduce((a, r) => a + (r.requestedPallets ?? 0), 0);
+
+                          // Несколько заявок в одной ячейке (два заказа или ошибочный
+                          // дубль) — показываем сумму + счётчик «·N» фиолетовым и по
+                          // клику раскрываем поповер со ссылкой на каждую заявку, чтобы
+                          // логист мог их проверить. Одна заявка — как раньше, ссылкой.
+                          const chip = (
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                              background: multi ? '#f9f0ff' : offSchedule ? '#fff7e6' : '#f0f9ff',
+                              border: `1px ${multi ? 'solid' : offSchedule ? 'dashed' : 'solid'} ${multi ? '#d3adf7' : offSchedule ? '#ffd591' : '#bae0ff'}`,
+                              borderRadius: 6, padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap',
+                            }}>
+                              <Badge color={multi ? 'purple' : statusCfg[existingReq.status]?.color ?? 'default'} />
+                              <span style={{ fontWeight: 600, color: multi ? '#722ed1' : offSchedule ? '#ad6800' : '#0958d9' }}>
+                                {multi ? `${sumPallets} пал · ${existingReqs.length}` : `${existingReq.requestedPallets ?? '?'} пал`}
+                              </span>
+                            </span>
+                          );
+
                           return (
                             <td key={day} style={{ ...dayCellBase, background: isToday ? '#e6f4ff' : undefined }}>
-                              {/* Компактная плашка: сам объём и есть ссылка на заявку.
-                                  Номер заявки распирал таблицу — убран в подсказку.
-                                  Вне графика — пунктир и янтарный цвет: видно, что отклонение. */}
-                              <Link href={`/requests/${existingReq.id}`}>
-                                <Tooltip
-                                  title={`${existingReq.requestNumber} · ${statusCfg[existingReq.status]?.label ?? existingReq.status}${offSchedule ? ' · вне графика' : ''}`}
+                              {multi ? (
+                                <Popover
+                                  trigger="click"
+                                  title={`${existingReqs.length} заявки в ячейке — проверьте`}
+                                  content={
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 280 }}>
+                                      {existingReqs.map((r) => (
+                                        <Link key={r.id} href={`/requests/${r.id}`} style={{ whiteSpace: 'nowrap' }}>
+                                          <Badge color={statusCfg[r.status]?.color ?? 'default'} />{' '}
+                                          {r.requestNumber} · {statusCfg[r.status]?.label ?? r.status} · {r.requestedPallets ?? '?'} пал
+                                        </Link>
+                                      ))}
+                                    </div>
+                                  }
                                 >
-                                  <span style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 5,
-                                    background: offSchedule ? '#fff7e6' : '#f0f9ff',
-                                    border: `1px ${offSchedule ? 'dashed' : 'solid'} ${offSchedule ? '#ffd591' : '#bae0ff'}`,
-                                    borderRadius: 6, padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap',
-                                  }}>
-                                    <Badge color={statusCfg[existingReq.status]?.color ?? 'default'} />
-                                    <span style={{ fontWeight: 600, color: offSchedule ? '#ad6800' : '#0958d9' }}>{existingReq.requestedPallets ?? '?'} пал</span>
-                                  </span>
-                                </Tooltip>
-                              </Link>
+                                  {chip}
+                                </Popover>
+                              ) : (
+                                <Link href={`/requests/${existingReq.id}`}>
+                                  <Tooltip title={`${existingReq.requestNumber} · ${statusCfg[existingReq.status]?.label ?? existingReq.status}${offSchedule ? ' · вне графика' : ''}`}>
+                                    {chip}
+                                  </Tooltip>
+                                </Link>
+                              )}
                             </td>
                           );
                         }
@@ -850,8 +884,8 @@ export default function PlanningClient({ initialData, initialWeek }: { initialDa
                       // всё равно надо заказывать. Незаписанный ввод возможен
                       // только там, где есть поле, то есть в редактируемой строке.
                       const reqDate = row.dayShift ? dayDate.subtract(row.dayShift, 'day') : dayDate;
-                      const req = findRequest(cid2, sOid, sDid, reqDate);
-                      if (req) total += req.requestedPallets ?? 0;
+                      const reqs = findRequests(cid2, sOid, sDid, reqDate);
+                      if (reqs.length) total += reqs.reduce((a, r) => a + (r.requestedPallets ?? 0), 0);
                       else if (row.schedule && row.days[i] != null) total += pending[`${cid2}__${sOid}__${sDid}__${dStr}`] ?? 0;
                     }
                     return (
