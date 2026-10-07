@@ -82,6 +82,20 @@ const ddmm = (d: Date | null) =>
 
 type Row = { label: string; pallets: number };
 
+// Одинаковые строки (одна точка выгрузки + клиент) от РАЗНЫХ заявок склеиваем в
+// одну, суммируя паллеты: в письме это один пункт, а не повтор. Симптом был в
+// блоке «в Казань» — две заявки Йуми→Самокат Казань давали две одинаковые строки.
+// (В блоке «Ритейлы LAAS» склейка уже есть по парам точка+клиент.)
+function mergeRows(rows: Row[]): Row[] {
+  const byLabel = new Map<string, Row>();
+  for (const r of rows) {
+    const ex = byLabel.get(r.label);
+    if (ex) ex.pallets += r.pallets;
+    else byLabel.set(r.label, { ...r });
+  }
+  return Array.from(byLabel.values());
+}
+
 /** Пустые строки и нули в письмо не идут — так просил заказчик письма. */
 function block(header: string, rows: Row[], totalWord: string): string[] {
   const kept = rows.filter((r) => r.pallets > 0);
@@ -120,13 +134,16 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
     },
   });
 
-  // Портянка — это «что СЕГОДНЯ выезжает из Москвы». У многоплечевых заявок
-  // (Колпино/Шушары через РЦ СПб, Казань → Ижевск/Самара) онвард-плечо из
-  // транзитного города забирается на день-два ПОЗЖЕ первого. Если брать любое
-  // плечо с забором за день, в портянку за день X попадает и локальное плечо
-  // заявки, выехавшей из Москвы раньше, — и объём РЦ задваивается (симптом был у
-  // Магнит Колпино/Шушары). Поэтому берём груз, только если ПЕРВОЕ его плечо
-  // (минимальный забор по всему грузу) приходится на этот день.
+  // Для блока «Ритейлы LAAS» (матч по конечной точке+клиенту, а не по коду плеча):
+  // у Колпино/Шушары груз идёт Поляна→хаб→РЦ СПб→РЦ, и локальное плечо РЦ СПб→РЦ
+  // (SPB-SPB) забирается на 2 дня ПОЗЖЕ первого. По конечной точке оно матчится с
+  // тем же РЦ, поэтому в портянку за день X попадало и локальное плечо заявки,
+  // выехавшей из Москвы раньше, — объём РЦ задваивался. Берём груз в этот блок,
+  // только если его ПЕРВОЕ плечо (мин. забор по грузу) — сегодня, т.е. он реально
+  // выезжает из Москвы сегодня. (Блоки направлений ключуются магистральным MSK-*
+  // плечом — туда онвард-плечи с чужим кодом и так не попадают, им это не нужно;
+  // и наоборот: заявка из Питера, напр. Шаверно→Казань, из Москвы едет НЕ первым
+  // плечом, поэтому для направлений правило «первое плечо» применять нельзя.)
   const cargoIds = Array.from(new Set(legs.map((l) => l.cargo.id)));
   const firstPickup = new Map<string, number>();
   if (cargoIds.length) {
@@ -143,7 +160,8 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
     const first = firstPickup.get(l.cargo.id);
     return first != null && first >= day.getTime() && first < dayEnd.getTime();
   };
-  // Только грузы, выезжающие из Москвы сегодня (первое плечо — в этот день).
+  // Грузы, выезжающие из Москвы сегодня (первое плечо — в этот день). Только для
+  // блока «Ритейлы LAAS» (см. комментарий выше).
   const legsToday = legs.filter(departsToday);
 
   const out: string[] = [];
@@ -157,10 +175,10 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
 
   // Блоки 1–2: отгрузка с точки забора. Строка — конечная точка выгрузки заявки.
   for (const b of PICKUP_BLOCKS) {
-    const rows = dedupe(legsToday.filter((l) => l.pickupLocation?.code === b.locationCode)).map((l) => ({
+    const rows = mergeRows(dedupe(legs.filter((l) => l.pickupLocation?.code === b.locationCode)).map((l) => ({
       label: `${clean(l.cargo.request.deliveryLocation?.name)} - ${clean(l.cargo.request.customer.name)}`,
       pallets: l.cargo.pallets ?? 0,
-    }));
+    })));
     out.push(...block(`Отгрузка ${b.title} ${dayLabel}`, orderRows(rows, b.order), 'палл'));
   }
 
@@ -185,11 +203,11 @@ export async function buildPortyanka(dateISO: string): Promise<string> {
   // Блоки направлений. Даты в шапке берутся с самих плеч направления —
   // это и есть отгрузка и доставка магистрального плеча.
   for (const b of DIRECTION_BLOCKS) {
-    const mine = dedupe(legsToday.filter((l) => l.direction?.code === b.directionCode));
-    const rows = mine.map((l) => ({
+    const mine = dedupe(legs.filter((l) => l.direction?.code === b.directionCode));
+    const rows = mergeRows(mine.map((l) => ({
       label: `${clean(l.cargo.request.deliveryLocation?.name)} - ${clean(l.cargo.request.customer.name)}`,
       pallets: l.cargo.pallets ?? 0,
-    }));
+    })));
     const dropoffs = mine.map((l) => l.plannedDropoff).filter(Boolean) as Date[];
     const arrival = dropoffs.length
       ? new Date(Math.min(...dropoffs.map((d) => d.getTime())))
